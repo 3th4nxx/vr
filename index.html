@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Hand Tracking</title>
-
+<title>Camera Test</title>
 <style>
 html,body{
 margin:0;
@@ -15,19 +14,12 @@ overflow:hidden;
 background:#000;
 }
 
-#video{
+video{
 position:fixed;
 inset:0;
 width:100%;
 height:100%;
 object-fit:cover;
-}
-
-#canvas{
-position:fixed;
-inset:0;
-width:100%;
-height:100%;
 }
 
 #start{
@@ -36,11 +28,11 @@ z-index:10;
 left:50%;
 top:50%;
 transform:translate(-50%,-50%);
-padding:18px 35px;
-border:0;
-border-radius:18px;
-font-size:22px;
+padding:20px 40px;
+font-size:24px;
 font-weight:bold;
+border:0;
+border-radius:20px;
 background:white;
 color:black;
 }
@@ -51,12 +43,12 @@ z-index:20;
 top:15px;
 left:15px;
 right:15px;
-padding:12px 15px;
-border-radius:12px;
+padding:15px;
+border-radius:15px;
 background:rgba(0,0,0,.75);
 color:white;
 font-family:Arial,sans-serif;
-font-size:15px;
+font-size:16px;
 text-align:center;
 }
 </style>
@@ -65,86 +57,26 @@ text-align:center;
 <body>
 
 <video id="video" autoplay playsinline></video>
-<canvas id="canvas"></canvas>
 
-<button id="start">START</button>
+<button id="start">START CAMERA</button>
 
-<div id="status">Loading...</div>
+<div id="status">Camera test ready</div>
 
-<script type="module">
-
-import {
-FilesetResolver,
-HandLandmarker
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm";
+<script>
 
 const video=document.getElementById("video");
-const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d");
-const startButton=document.getElementById("start");
+const start=document.getElementById("start");
 const status=document.getElementById("status");
-
-let handLandmarker=null;
-let running=false;
-let lastTime=-1;
-
-async function loadHandTracking(){
-
-try{
-
-status.textContent="Loading MediaPipe...";
-
-const vision=await FilesetResolver.forVisionTasks(
-"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-);
-
-status.textContent="Loading hand model...";
-
-handLandmarker=await HandLandmarker.createFromOptions(
-vision,
-{
-baseOptions:{
-modelAssetPath:
-"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-delegate:"GPU"
-},
-runningMode:"VIDEO",
-numHands:2,
-minHandDetectionConfidence:0.5,
-minHandPresenceConfidence:0.5,
-minTrackingConfidence:0.5
-}
-);
-
-status.textContent="Hand tracking ready";
-
-}catch(error){
-
-console.error(error);
-
-status.textContent="ERROR: "+error.message;
-
-}
-
-}
 
 async function startCamera(){
 
-try{
+status.textContent="Requesting camera permission...";
 
-status.textContent="Requesting rear camera...";
+try{
 
 const stream=await navigator.mediaDevices.getUserMedia({
 video:{
-facingMode:{
-exact:"environment"
-},
-width:{
-ideal:1280
-},
-height:{
-ideal:720
-}
+facingMode:"environment"
 },
 audio:false
 });
@@ -153,157 +85,22 @@ video.srcObject=stream;
 
 await video.play();
 
-canvas.width=video.videoWidth;
-canvas.height=video.videoHeight;
+start.style.display="none";
 
-startButton.style.display="none";
-
-status.textContent="Camera working — show your hands";
-
-running=true;
-
-requestAnimationFrame(trackHands);
+status.textContent="REAR CAMERA WORKING";
 
 }catch(error){
 
-console.error(error);
-
-status.textContent="CAMERA ERROR: "+error.message;
-
-}
-
-}
-
-function trackHands(time){
-
-if(!running){
-
-return;
-
-}
-
-if(video.readyState>=2 && handLandmarker){
-
-if(time-lastTime>50){
-
-lastTime=time;
-
-try{
-
-const result=handLandmarker.detectForVideo(
-video,
-time
-);
-
-ctx.clearRect(
-0,
-0,
-canvas.width,
-canvas.height
-);
-
-if(result.landmarks.length>0){
-
 status.textContent=
-"Hands detected: "+result.landmarks.length;
+"ERROR: "+error.name+" — "+error.message;
 
-for(let i=0;i<result.landmarks.length;i++){
-
-const hand=result.landmarks[i];
-
-const wrist=hand[0];
-const indexBase=hand[5];
-const middleBase=hand[9];
-const pinkyBase=hand[17];
-
-const x=
-(
-wrist.x+
-indexBase.x+
-middleBase.x+
-pinkyBase.x
-)/4;
-
-const y=
-(
-wrist.y+
-indexBase.y+
-middleBase.y+
-pinkyBase.y
-)/4;
-
-drawHandMarker(
-x*canvas.width,
-y*canvas.height,
-i
-);
-
-}
-
-}else{
-
-status.textContent="No hands detected";
-
-}
-
-}catch(error){
-
-console.error(error);
-
-status.textContent=
-"TRACKING ERROR: "+error.message;
+console.log(error);
 
 }
 
 }
 
-}
-
-requestAnimationFrame(trackHands);
-
-}
-
-function drawHandMarker(x,y,index){
-
-ctx.beginPath();
-
-ctx.arc(
-x,
-y,
-45,
-0,
-Math.PI*2
-);
-
-ctx.fillStyle=
-index===0
-?"rgba(0,255,100,0.8)"
-:"rgba(0,180,255,0.8)";
-
-ctx.fill();
-
-ctx.beginPath();
-
-ctx.arc(
-x,
-y,
-18,
-0,
-Math.PI*2
-);
-
-ctx.fillStyle="white";
-
-ctx.fill();
-
-}
-
-startButton.addEventListener(
-"click",
-startCamera
-);
-
-loadHandTracking();
+start.addEventListener("click",startCamera);
 
 </script>
 
