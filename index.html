@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Automatic Hand Detection</title>
+<title>Hand Detection</title>
 
 <style>
 html,body{
@@ -25,74 +25,81 @@ object-fit:cover;
 
 #status{
 position:fixed;
-z-index:20;
+z-index:10;
 top:15px;
 left:15px;
 right:15px;
 padding:14px;
 border-radius:14px;
-background:rgba(0,0,0,.7);
+background:rgba(0,0,0,.75);
 color:white;
 font-family:Arial,sans-serif;
 font-size:18px;
 text-align:center;
 }
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
 </head>
 
 <body>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted></video>
 
-<div id="status">Starting...</div>
+<div id="status">Loading hand tracking...</div>
 
-<script type="module">
+<script>
 
 const video=document.getElementById("video");
 const status=document.getElementById("status");
 
-let detector=null;
+let hands;
 let running=false;
 let lastDetection=0;
 
-async function loadHandTracking(){
+function createHandDetector(){
 
 try{
 
-status.textContent="Loading hand tracking...";
-
-const module=await import(
-"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm"
-);
-
-const FilesetResolver=module.FilesetResolver;
-const HandLandmarker=module.HandLandmarker;
-
-if(!FilesetResolver || !HandLandmarker){
-
-throw new Error("MediaPipe failed to load");
-
+hands=new Hands({
+locateFile:function(file){
+return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file;
 }
+});
 
-const vision=await FilesetResolver.forVisionTasks(
-"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-);
-
-detector=await HandLandmarker.createFromOptions(
-vision,
-{
-baseOptions:{
-modelAssetPath:
-"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-delegate:"GPU"
-},
-runningMode:"VIDEO",
-numHands:2,
-minHandDetectionConfidence:0.5,
-minHandPresenceConfidence:0.5,
+hands.setOptions({
+maxNumHands:2,
+modelComplexity:0,
+minDetectionConfidence:0.5,
 minTrackingConfidence:0.5
+});
+
+hands.onResults(function(results){
+
+const count=results.multiHandLandmarks
+?results.multiHandLandmarks.length
+:0;
+
+if(count===0){
+
+status.textContent="Looking for hands...";
+
 }
-);
+
+if(count===1){
+
+status.textContent="1 HAND DETECTED";
+
+}
+
+if(count>=2){
+
+status.textContent="2 HANDS DETECTED";
+
+}
+
+});
 
 status.textContent="Hand tracking ready";
 
@@ -100,9 +107,9 @@ startCamera();
 
 }catch(error){
 
-console.error(error);
-
 status.textContent="HAND TRACKING ERROR: "+error.message;
+
+console.error(error);
 
 }
 
@@ -135,19 +142,19 @@ running=true;
 
 status.textContent="Looking for hands...";
 
-requestAnimationFrame(detectHands);
+detect();
 
 }catch(error){
 
+status.textContent="CAMERA ERROR: "+error.name+" - "+error.message;
+
 console.error(error);
 
-status.textContent="CAMERA ERROR: "+error.message;
-
 }
 
 }
 
-function detectHands(time){
+async function detect(){
 
 if(!running){
 
@@ -155,58 +162,39 @@ return;
 
 }
 
-if(detector && video.readyState>=2){
+const now=performance.now();
 
-if(time-lastDetection>=80){
+if(now-lastDetection>100){
 
-lastDetection=time;
+lastDetection=now;
 
 try{
 
-const result=detector.detectForVideo(
-video,
-time
-);
-
-const count=result.landmarks
-?result.landmarks.length
-:0;
-
-if(count===0){
-
-status.textContent="Looking for hands...";
-
-}
-
-if(count===1){
-
-status.textContent="1 HAND DETECTED";
-
-}
-
-if(count>=2){
-
-status.textContent="2 HANDS DETECTED";
-
-}
+await hands.send({
+image:video
+});
 
 }catch(error){
 
 console.error(error);
 
-status.textContent="DETECTION ERROR: "+error.message;
-
 }
 
 }
 
-}
-
-requestAnimationFrame(detectHands);
+requestAnimationFrame(detect);
 
 }
 
-loadHandTracking();
+if(typeof Hands==="undefined"){
+
+status.textContent="MediaPipe library failed to load";
+
+}else{
+
+createHandDetector();
+
+}
 
 </script>
 
