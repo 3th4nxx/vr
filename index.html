@@ -2,17 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Camera Saber</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Camera VR YouTube</title>
 <style>
-html,body{
+*{
 margin:0;
 padding:0;
+box-sizing:border-box;
+-webkit-user-select:none;
+user-select:none;
+}
+
+html,body{
 width:100%;
 height:100%;
 overflow:hidden;
 background:#000;
+font-family:Arial,sans-serif;
 }
 
 #video{
@@ -21,6 +27,7 @@ inset:0;
 width:100%;
 height:100%;
 object-fit:cover;
+z-index:1;
 }
 
 #game{
@@ -28,665 +35,396 @@ position:fixed;
 inset:0;
 width:100%;
 height:100%;
+z-index:2;
 pointer-events:none;
-}
-
-#hud{
-position:fixed;
-z-index:20;
-top:12px;
-left:50%;
-transform:translateX(-50%);
-color:white;
-font-family:Arial,sans-serif;
-text-align:center;
-pointer-events:none;
-text-shadow:0 2px 5px #000;
-}
-
-#score{
-font-size:25px;
-font-weight:bold;
-}
-
-#combo{
-font-size:18px;
-margin-top:4px;
 }
 
 #status{
 position:fixed;
-z-index:20;
-bottom:15px;
+left:50%;
+bottom:25px;
+transform:translateX(-50%);
+z-index:30;
+padding:10px 18px;
+border-radius:20px;
+background:rgba(0,0,0,.55);
+color:white;
+font-size:14px;
+backdrop-filter:blur(10px);
+}
+
+#voice{
+position:fixed;
+top:18px;
 left:50%;
 transform:translateX(-50%);
+z-index:30;
+padding:10px 16px;
+border-radius:20px;
+background:rgba(0,0,0,.55);
 color:white;
-font-family:Arial,sans-serif;
+font-size:13px;
+backdrop-filter:blur(10px);
+}
+
+#youtube{
+position:fixed;
+width:min(90vw,700px);
+height:min(58vh,430px);
+left:50%;
+top:50%;
+transform:translate(-50%,-50%);
+z-index:20;
+display:none;
+border-radius:18px;
+overflow:hidden;
+background:#000;
+border:1px solid rgba(255,255,255,.3);
+box-shadow:0 25px 80px rgba(0,0,0,.75);
+touch-action:none;
+}
+
+#bar{
+height:46px;
+background:rgba(15,15,15,.96);
+display:flex;
+align-items:center;
+padding:0 12px;
+color:white;
 font-size:15px;
-text-align:center;
+font-weight:bold;
+cursor:grab;
+}
+
+#bar.grabbing{
+cursor:grabbing;
+}
+
+#title{
+display:flex;
+align-items:center;
+gap:8px;
+}
+
+#logo{
+width:28px;
+height:20px;
+border-radius:6px;
+background:#ff0000;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:11px;
+}
+
+#close{
+margin-left:auto;
+width:30px;
+height:30px;
+border:0;
+border-radius:50%;
+background:#333;
+color:white;
+font-size:18px;
+}
+
+#player{
+width:100%;
+height:calc(100% - 46px);
+background:#000;
+}
+
+#player iframe{
+width:100%;
+height:100%;
+border:0;
+}
+
+.hand{
+position:fixed;
+width:17px;
+height:17px;
+border-radius:50%;
+z-index:40;
 pointer-events:none;
-text-shadow:0 2px 5px #000;
+transform:translate(-50%,-50%);
+display:none;
+}
+
+#hand1{
+background:#00e5ff;
+box-shadow:0 0 18px #00e5ff;
+}
+
+#hand2{
+background:#ff3b81;
+box-shadow:0 0 18px #ff3b81;
 }
 </style>
-
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-
 </head>
-
 <body>
 
 <video id="video" autoplay playsinline muted></video>
-
 <canvas id="game"></canvas>
 
-<div id="hud">
-<div id="score">SCORE 0</div>
-<div id="combo">COMBO 0</div>
+<div id="voice">Say "YouTube"</div>
+<div id="status">Looking for hands...</div>
+
+<div id="youtube">
+<div id="bar">
+<div id="title">
+<div id="logo">▶</div>
+YouTube
+</div>
+<button id="close">×</button>
 </div>
 
-<div id="status">Starting...</div>
+<div id="player">
+<iframe
+src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&playsinline=1&rel=0"
+allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+allowfullscreen>
+</iframe>
+</div>
+</div>
+
+<div id="hand1" class="hand"></div>
+<div id="hand2" class="hand"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <script>
-
 const video=document.getElementById("video");
 const canvas=document.getElementById("game");
 const ctx=canvas.getContext("2d");
-
-const scoreText=document.getElementById("score");
-const comboText=document.getElementById("combo");
-const statusText=document.getElementById("status");
+const status=document.getElementById("status");
+const voice=document.getElementById("voice");
+const youtube=document.getElementById("youtube");
+const bar=document.getElementById("bar");
+const close=document.getElementById("close");
+const hand1=document.getElementById("hand1");
+const hand2=document.getElementById("hand2");
 
 let hands;
-let running=false;
-let lastDetection=0;
-let lastFrame=0;
-let lastSpawn=0;
-
-let score=0;
-let combo=0;
-let misses=0;
-
-let handData=[];
-let blocks=[];
-let particles=[];
-
-let width=0;
-let height=0;
+let data=[];
+let dragging=false;
+let pinch=false;
+let offsetX=0;
+let offsetY=0;
+let recognition;
 
 function resize(){
-
-width=window.innerWidth;
-height=window.innerHeight;
-
-const dpr=Math.min(window.devicePixelRatio||1,2);
-
-canvas.width=width*dpr;
-canvas.height=height*dpr;
-
-canvas.style.width=width+"px";
-canvas.style.height=height+"px";
-
-ctx.setTransform(dpr,0,0,dpr,0,0);
-
+canvas.width=innerWidth;
+canvas.height=innerHeight;
 }
 
-window.addEventListener("resize",resize);
-
+addEventListener("resize",resize);
 resize();
 
-function setupHands(){
-
-hands=new Hands({
-locateFile:function(file){
-return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file;
-}
-});
-
-hands.setOptions({
-maxNumHands:2,
-modelComplexity:0,
-minDetectionConfidence:0.5,
-minTrackingConfidence:0.5
-});
-
-hands.onResults(function(results){
-
-handData=[];
-
-if(results.multiHandLandmarks){
-
-for(let i=0;i<results.multiHandLandmarks.length;i++){
-
-const hand=results.multiHandLandmarks[i];
-
-handData.push({
-wrist:hand[0],
-index:hand[8],
-middle:hand[9]
-});
-
-}
-
-}
-
-});
-
-}
-
 async function startCamera(){
-
 try{
-
-statusText.textContent="Starting camera...";
-
 const stream=await navigator.mediaDevices.getUserMedia({
 video:{
-facingMode:"environment",
-width:{
-ideal:1280
-},
-height:{
-ideal:720
-}
+facingMode:{ideal:"environment"},
+width:{ideal:1280},
+height:{ideal:720}
 },
 audio:false
 });
 
 video.srcObject=stream;
-
 await video.play();
-
-running=true;
-
-statusText.textContent="SHOW YOUR HANDS";
-
-requestAnimationFrame(gameLoop);
-
-}catch(error){
-
-statusText.textContent="CAMERA ERROR: "+error.name;
-
-console.error(error);
-
+setupHands();
+startVoice();
+}catch(e){
+status.textContent="Camera permission required";
+}
 }
 
+function setupHands(){
+hands=new Hands({
+locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file
+});
+
+hands.setOptions({
+maxNumHands:2,
+modelComplexity:0,
+minDetectionConfidence:.55,
+minTrackingConfidence:.55
+});
+
+hands.onResults(results=>{
+data=[];
+
+if(results.multiHandLandmarks){
+for(const lm of results.multiHandLandmarks){
+
+const wrist=lm[0];
+const index=lm[8];
+const thumb=lm[4];
+
+const x=(1-wrist.x)*innerWidth;
+const y=wrist.y*innerHeight;
+
+const ix=(1-index.x)*innerWidth;
+const iy=index.y*innerHeight;
+
+const tx=(1-thumb.x)*innerWidth;
+const ty=thumb.y*innerHeight;
+
+const pinchDistance=Math.hypot(ix-tx,iy-ty);
+
+data.push({
+x,
+y,
+ix,
+iy,
+pinch:pinchDistance<38
+});
+}
 }
 
-async function detectHands(){
+updateHands();
+handleVR();
+});
 
-if(!hands||video.readyState<2){
+detect();
+}
+
+async function detect(){
+if(video.readyState>=2){
+await hands.send({image:video});
+}
+
+setTimeout(detect,80);
+}
+
+function updateHands(){
+hand1.style.display="none";
+hand2.style.display="none";
+
+if(data[0]){
+hand1.style.display="block";
+hand1.style.left=data[0].x+"px";
+hand1.style.top=data[0].y+"px";
+}
+
+if(data[1]){
+hand2.style.display="block";
+hand2.style.left=data[1].x+"px";
+hand2.style.top=data[1].y+"px";
+}
+
+if(data.length){
+status.textContent=data.length+" HAND"+(data.length===1?"":"S")+" DETECTED";
+}else{
+status.textContent="Looking for hands...";
+}
+}
+
+function insideHeader(x,y){
+const r=bar.getBoundingClientRect();
+return x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom;
+}
+
+function handleVR(){
+if(!youtube.style.display||youtube.style.display==="none")return;
+if(!data.length)return;
+
+const h=data[0];
+
+if(h.pinch&&!pinch){
+if(insideHeader(h.x,h.y)){
+const r=youtube.getBoundingClientRect();
+
+offsetX=h.x-r.left;
+offsetY=h.y-r.top;
+
+dragging=true;
+bar.classList.add("grabbing");
+}
+}
+
+if(!h.pinch&&pinch){
+dragging=false;
+bar.classList.remove("grabbing");
+}
+
+if(dragging&&h.pinch){
+youtube.style.left=(h.x-offsetX+youtube.offsetWidth/2)+"px";
+youtube.style.top=(h.y-offsetY+youtube.offsetHeight/2)+"px";
+youtube.style.transform="translate(-50%,-50%)";
+}
+
+pinch=h.pinch;
+}
+
+function openYouTube(){
+youtube.style.display="block";
+voice.textContent="YouTube opened";
+
+setTimeout(()=>{
+voice.textContent='Say "YouTube"';
+},2500);
+}
+
+function closeYouTube(){
+youtube.style.display="none";
+dragging=false;
+pinch=false;
+bar.classList.remove("grabbing");
+}
+
+close.onclick=closeYouTube;
+
+function startVoice(){
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+if(!SpeechRecognition){
+voice.textContent="Voice control unavailable";
 return;
 }
+
+recognition=new SpeechRecognition();
+
+recognition.continuous=true;
+recognition.interimResults=false;
+recognition.lang="en-US";
+
+recognition.onresult=e=>{
+const text=e.results[e.results.length-1][0].transcript.toLowerCase();
+
+if(text.includes("youtube")){
+openYouTube();
+}
+};
+
+recognition.onend=()=>{
+try{
+recognition.start();
+}catch(e){}
+};
+
+recognition.onerror=()=>{
+setTimeout(()=>{
+try{
+recognition.start();
+}catch(e){}
+},1000);
+};
 
 try{
-
-await hands.send({
-image:video
-});
-
-}catch(error){
-
-console.error(error);
-
+recognition.start();
+}catch(e){}
 }
 
+function draw(){
+ctx.clearRect(0,0,canvas.width,canvas.height);
+requestAnimationFrame(draw);
 }
 
-function spawnBlock(){
-
-const lane=Math.floor(Math.random()*6);
-
-const xPositions=[
-0.15,
-0.35,
-0.5,
-0.65,
-0.85
-];
-
-const yPositions=[
-0.3,
-0.5,
-0.7
-];
-
-blocks.push({
-x:xPositions[Math.floor(Math.random()*xPositions.length)],
-y:yPositions[Math.floor(Math.random()*yPositions.length)],
-z:1,
-size:0.07,
-side:lane%2,
-rotation:(Math.random()-0.5)*0.8,
-hit:false,
-color:lane%2===0?"#ff304f":"#27e8ff"
-});
-
-}
-
-function updateBlocks(dt){
-
-for(let i=blocks.length-1;i>=0;i--){
-
-const b=blocks[i];
-
-b.z-=dt*0.00045;
-
-if(b.z<0.03){
-
-if(!b.hit){
-
-misses++;
-combo=0;
-
-}
-
-blocks.splice(i,1);
-
-}
-
-}
-
-}
-
-function getHandPositions(){
-
-const result=[];
-
-for(let i=0;i<handData.length;i++){
-
-const h=handData[i];
-
-const x=(h.wrist.x+h.index.x)/2;
-const y=(h.wrist.y+h.index.y)/2;
-
-const dx=h.index.x-h.wrist.x;
-const dy=h.index.y-h.wrist.y;
-
-result.push({
-x:x,
-y:y,
-dx:dx,
-dy:dy,
-hand:i
-});
-
-}
-
-return result;
-
-}
-
-function checkHits(){
-
-const swords=getHandPositions();
-
-for(let i=blocks.length-1;i>=0;i--){
-
-const b=blocks[i];
-
-if(b.hit){
-continue;
-}
-
-const depth=1-b.z;
-
-const bx=0.5+(b.x-0.5)*(1+depth*2.4);
-const by=0.5+(b.y-0.5)*(1+depth*2.4);
-
-const hitSize=b.size*(1+depth*2.8);
-
-for(const sword of swords){
-
-const distance=Math.sqrt(
-(sword.x-bx)*(sword.x-bx)+
-(sword.y-by)*(sword.y-by)
-);
-
-if(distance<hitSize*1.6){
-
-b.hit=true;
-
-score+=100+combo*10;
-
-combo++;
-
-createExplosion(
-bx,
-by,
-b.color
-);
-
-blocks.splice(i,1);
-
-break;
-
-}
-
-}
-
-}
-
-}
-
-function createExplosion(x,y,color){
-
-for(let i=0;i<18;i++){
-
-particles.push({
-x:x,
-y:y,
-vx:(Math.random()-0.5)*0.015,
-vy:(Math.random()-0.5)*0.015,
-life:1,
-color:color
-});
-
-}
-
-}
-
-function updateParticles(dt){
-
-for(let i=particles.length-1;i>=0;i--){
-
-const p=particles[i];
-
-p.x+=p.vx*dt;
-p.y+=p.vy*dt;
-
-p.life-=dt*0.002;
-
-if(p.life<=0){
-
-particles.splice(i,1);
-
-}
-
-}
-
-}
-
-function drawCamera(){
-
-if(video.readyState<2){
-return;
-}
-
-ctx.clearRect(
-0,
-0,
-width,
-height
-);
-
-const vw=video.videoWidth;
-const vh=video.videoHeight;
-
-if(!vw||!vh){
-return;
-}
-
-const videoRatio=vw/vh;
-const screenRatio=width/height;
-
-let sx=0;
-let sy=0;
-let sw=vw;
-let sh=vh;
-
-if(videoRatio>screenRatio){
-
-sw=vh*screenRatio;
-sx=(vw-sw)/2;
-
-}else{
-
-sh=vw/screenRatio;
-sy=(vh-sh)/2;
-
-}
-
-ctx.drawImage(
-video,
-sx,
-sy,
-sw,
-sh,
-0,
-0,
-width,
-height
-);
-
-}
-
-function drawBlocks(){
-
-for(const b of blocks){
-
-const depth=1-b.z;
-
-const size=
-b.size*
-Math.min(width,height)*
-(0.5+depth*3.5);
-
-const x=
-width*
-(
-0.5+
-(b.x-0.5)*
-(1+depth*2.4)
-);
-
-const y=
-height*
-(
-0.5+
-(b.y-0.5)*
-(1+depth*2.4)
-);
-
-ctx.save();
-
-ctx.translate(x,y);
-
-ctx.rotate(b.rotation);
-
-ctx.fillStyle=b.color;
-
-ctx.shadowColor=b.color;
-ctx.shadowBlur=20;
-
-ctx.fillRect(
--size/2,
--size/2,
-size,
-size
-);
-
-ctx.shadowBlur=0;
-
-ctx.fillStyle="white";
-
-ctx.beginPath();
-
-ctx.moveTo(0,-size*0.3);
-ctx.lineTo(size*0.2,0);
-ctx.lineTo(0,size*0.3);
-ctx.lineTo(-size*0.2,0);
-
-ctx.closePath();
-
-ctx.fill();
-
-ctx.restore();
-
-}
-
-}
-
-function drawSabers(){
-
-const swords=getHandPositions();
-
-for(const sword of swords){
-
-const color=
-sword.hand===0
-?"#27e8ff"
-:"#ff304f";
-
-const x=sword.x*width;
-const y=sword.y*height;
-
-const endX=
-x+sword.dx*width*2.8;
-
-const endY=
-y+sword.dy*height*2.8;
-
-ctx.save();
-
-ctx.lineCap="round";
-
-ctx.strokeStyle=color;
-
-ctx.shadowColor=color;
-
-ctx.shadowBlur=25;
-
-ctx.lineWidth=10;
-
-ctx.beginPath();
-
-ctx.moveTo(x,y);
-
-ctx.lineTo(endX,endY);
-
-ctx.stroke();
-
-ctx.shadowBlur=0;
-
-ctx.strokeStyle="white";
-
-ctx.lineWidth=3;
-
-ctx.beginPath();
-
-ctx.moveTo(x,y);
-
-ctx.lineTo(endX,endY);
-
-ctx.stroke();
-
-ctx.restore();
-
-}
-
-}
-
-function drawParticles(){
-
-for(const p of particles){
-
-ctx.globalAlpha=Math.max(0,p.life);
-
-ctx.fillStyle=p.color;
-
-ctx.beginPath();
-
-ctx.arc(
-p.x*width,
-p.y*height,
-5+p.life*5,
-0,
-Math.PI*2
-);
-
-ctx.fill();
-
-}
-
-ctx.globalAlpha=1;
-
-}
-
-function updateHUD(){
-
-scoreText.textContent="SCORE "+score;
-
-comboText.textContent="COMBO "+combo;
-
-if(handData.length===0){
-
-statusText.textContent="SHOW YOUR HANDS";
-
-}else if(handData.length===1){
-
-statusText.textContent="1 SABER ACTIVE";
-
-}else{
-
-statusText.textContent="2 SABERS ACTIVE";
-
-}
-
-}
-
-async function gameLoop(time){
-
-if(!running){
-return;
-}
-
-const dt=Math.min(
-time-lastFrame,
-50
-);
-
-lastFrame=time;
-
-if(time-lastDetection>100){
-
-lastDetection=time;
-
-detectHands();
-
-}
-
-if(time-lastSpawn>750){
-
-lastSpawn=time;
-
-spawnBlock();
-
-}
-
-updateBlocks(dt);
-
-updateParticles(dt);
-
-checkHits();
-
-drawCamera();
-
-drawBlocks();
-
-drawSabers();
-
-drawParticles();
-
-updateHUD();
-
-requestAnimationFrame(gameLoop);
-
-}
-
-setupHands();
-
+draw();
 startCamera();
-
 </script>
 
 </body>
