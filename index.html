@@ -2,550 +2,633 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>VR Camera</title>
-<style>
-*{
-margin:0;
-padding:0;
-box-sizing:border-box;
--webkit-user-select:none;
-user-select:none;
-}
-
-html,body{
-width:100%;
-height:100%;
-overflow:hidden;
-background:#000;
-font-family:Arial,sans-serif;
-}
-
-#camera{
-position:fixed;
-inset:0;
-width:100%;
-height:100%;
-object-fit:cover;
-z-index:1;
-}
-
-#scene{
-position:fixed;
-inset:0;
-width:100%;
-height:100%;
-z-index:5;
-pointer-events:none;
-overflow:hidden;
-perspective:900px;
-}
-
-#screen{
-position:absolute;
-width:min(88vw,700px);
-height:min(58vh,430px);
-left:50%;
-top:50%;
-display:none;
-transform-style:preserve-3d;
-pointer-events:auto;
-border-radius:18px;
-overflow:hidden;
-background:#000;
-box-shadow:0 25px 90px rgba(0,0,0,.8),0 0 40px rgba(255,255,255,.08);
-border:1px solid rgba(255,255,255,.3);
-}
-
-#screenBar{
-height:44px;
-display:flex;
-align-items:center;
-padding:0 12px;
-background:rgba(15,15,15,.96);
-color:#fff;
-font-weight:bold;
-cursor:grab;
-}
-
-#screenBar.grabbing{
-cursor:grabbing;
-}
-
-#youtubeLogo{
-width:29px;
-height:20px;
-border-radius:6px;
-background:#f00;
-display:flex;
-align-items:center;
-justify-content:center;
-font-size:11px;
-margin-right:8px;
-}
-
-#close{
-margin-left:auto;
-width:30px;
-height:30px;
-border:0;
-border-radius:50%;
-background:#333;
-color:#fff;
-font-size:18px;
-}
-
-#player{
-width:100%;
-height:calc(100% - 44px);
-background:#000;
-}
-
-#player iframe{
-width:100%;
-height:100%;
-border:0;
-display:block;
-}
-
-#status{
-position:fixed;
-bottom:20px;
-left:50%;
-transform:translateX(-50%);
-z-index:50;
-padding:9px 16px;
-border-radius:20px;
-background:rgba(0,0,0,.55);
-color:#fff;
-font-size:13px;
-backdrop-filter:blur(12px);
-}
-
-#voice{
-position:fixed;
-top:18px;
-left:50%;
-transform:translateX(-50%);
-z-index:50;
-padding:9px 15px;
-border-radius:20px;
-background:rgba(0,0,0,.55);
-color:#fff;
-font-size:13px;
-backdrop-filter:blur(12px);
-}
-
-.hand{
-position:fixed;
-width:17px;
-height:17px;
-border-radius:50%;
-z-index:60;
-pointer-events:none;
-display:none;
-transform:translate(-50%,-50%);
-}
-
-#handA{
-background:#00e5ff;
-box-shadow:0 0 18px #00e5ff;
-}
-
-#handB{
-background:#ff3b81;
-box-shadow:0 0 18px #ff3b81;
-}
-</style>
-</head>
-<body>
-
-<video id="camera" autoplay playsinline muted></video>
-
-<div id="scene">
-<div id="screen">
-<div id="screenBar">
-<div id="youtubeLogo">▶</div>
-YouTube
-<button id="close">×</button>
-</div>
-
-<div id="player">
-<iframe
-src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&playsinline=1&rel=0"
-allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-allowfullscreen>
-</iframe>
-</div>
-</div>
-</div>
-
-<div id="handA" class="hand"></div>
-<div id="handB" class="hand"></div>
-
-<div id="voice">Say "YouTube"</div>
-<div id="status">Starting camera...</div>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>AR YouTube</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
+<style>
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+  -webkit-tap-highlight-color:transparent;
+}
+
+html,body{
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#000;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  touch-action:none;
+}
+
+#camera{
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  transform:scaleX(-1);
+  background:#000;
+}
+
+#trackingCanvas{
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  z-index:5;
+}
+
+#hud{
+  position:fixed;
+  top:env(safe-area-inset-top,20px);
+  left:50%;
+  transform:translateX(-50%);
+  z-index:20;
+  padding:9px 15px;
+  border-radius:999px;
+  background:rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.18);
+  color:white;
+  font-size:13px;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  white-space:nowrap;
+  pointer-events:none;
+}
+
+#start{
+  position:fixed;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  z-index:100;
+  border:0;
+  border-radius:18px;
+  padding:16px 24px;
+  font-size:17px;
+  font-weight:700;
+  color:#fff;
+  background:rgba(20,20,20,.82);
+  box-shadow:0 10px 40px rgba(0,0,0,.4);
+  backdrop-filter:blur(15px);
+  -webkit-backdrop-filter:blur(15px);
+}
+
+#screen{
+  position:fixed;
+  width:min(88vw,520px);
+  aspect-ratio:16/9;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%) translate3d(0,0,0);
+  z-index:15;
+  display:none;
+  border-radius:20px;
+  overflow:hidden;
+  background:#000;
+  box-shadow:
+    0 20px 60px rgba(0,0,0,.55),
+    0 0 0 1px rgba(255,255,255,.2);
+  will-change:transform;
+  contain:layout paint;
+}
+
+#screen.active{
+  display:block;
+}
+
+#youtube{
+  width:100%;
+  height:100%;
+  border:0;
+  display:block;
+}
+
+#screenGlow{
+  position:absolute;
+  inset:-8px;
+  border-radius:26px;
+  border:1px solid rgba(255,255,255,.18);
+  pointer-events:none;
+}
+
+#pinchIndicator{
+  position:fixed;
+  width:34px;
+  height:34px;
+  margin:-17px 0 0 -17px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,.9);
+  box-shadow:0 0 20px rgba(255,255,255,.45);
+  z-index:30;
+  display:none;
+  pointer-events:none;
+}
+
+#voice{
+  position:fixed;
+  left:50%;
+  bottom:calc(25px + env(safe-area-inset-bottom,0px));
+  transform:translateX(-50%);
+  z-index:25;
+  color:#fff;
+  font-size:13px;
+  padding:9px 14px;
+  border-radius:999px;
+  background:rgba(0,0,0,.42);
+  border:1px solid rgba(255,255,255,.16);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  opacity:.85;
+  pointer-events:none;
+}
+
+.hidden{
+  display:none!important;
+}
+</style>
+</head>
+
+<body>
+
+<video id="camera" autoplay muted playsinline></video>
+<canvas id="trackingCanvas"></canvas>
+
+<div id="hud">Initializing camera...</div>
+
+<button id="start">START AR</button>
+
+<div id="screen">
+  <iframe
+    id="youtube"
+    src="https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&autoplay=0&rel=0"
+    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+    allowfullscreen>
+  </iframe>
+  <div id="screenGlow"></div>
+</div>
+
+<div id="pinchIndicator"></div>
+
+<div id="voice">Say “YouTube”</div>
+
 <script>
 const camera=document.getElementById("camera");
+const canvas=document.getElementById("trackingCanvas");
+const ctx=canvas.getContext("2d",{alpha:true});
+const hud=document.getElementById("hud");
+const start=document.getElementById("start");
 const screen=document.getElementById("screen");
-const screenBar=document.getElementById("screenBar");
-const closeButton=document.getElementById("close");
-const status=document.getElementById("status");
+const youtube=document.getElementById("youtube");
+const pinchIndicator=document.getElementById("pinchIndicator");
 const voice=document.getElementById("voice");
-const handA=document.getElementById("handA");
-const handB=document.getElementById("handB");
 
-let hands;
-let handData=[];
-let recognition=null;
+let stream=null;
+let hands=null;
+let lastVideoTime=-1;
+let processing=false;
+let lastResults=null;
+let handVisible=false;
 
-let screenOpen=false;
+let screenX=0;
+let screenY=0;
+
+let targetX=0;
+let targetY=0;
+
 let dragging=false;
-let wasPinching=false;
+let pinchStartX=0;
+let pinchStartY=0;
+let screenStartX=0;
+let screenStartY=0;
 
-let dragOffsetX=0;
-let dragOffsetY=0;
+let lastHandX=0;
+let lastHandY=0;
 
-let anchorYaw=0;
-let anchorPitch=0;
+let recognition=null;
+let recognitionStarted=false;
 
-let deviceYaw=0;
-let devicePitch=0;
+function resizeCanvas(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
 
-let screenX=50;
-let screenY=50;
+  canvas.width=Math.floor(innerWidth*dpr);
+  canvas.height=Math.floor(innerHeight*dpr);
 
-let orientationEnabled=false;
+  canvas.style.width=innerWidth+"px";
+  canvas.style.height=innerHeight+"px";
 
-function clamp(v,a,b){
-return Math.max(a,Math.min(b,v));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+resizeCanvas();
+addEventListener("resize",resizeCanvas);
+
+function updateScreen(){
+  const smoothing=dragging?0.42:0.22;
+
+  screenX+=(targetX-screenX)*smoothing;
+  screenY+=(targetY-screenY)*smoothing;
+
+  screen.style.transform=
+    `translate(-50%,-50%) translate3d(${screenX}px,${screenY}px,0)`;
+
+  requestAnimationFrame(updateScreen);
+}
+
+requestAnimationFrame(updateScreen);
+
+function setStatus(text){
+  hud.textContent=text;
 }
 
 async function startCamera(){
-try{
-const stream=await navigator.mediaDevices.getUserMedia({
-video:{
-facingMode:{ideal:"environment"},
-width:{ideal:1280},
-height:{ideal:720}
-},
-audio:false
-});
 
-camera.srcObject=stream;
+  if(stream) return;
 
-await camera.play();
+  try{
 
-setupHands();
-startVoice();
+    setStatus("Requesting camera...");
 
-status.textContent="Looking for hands...";
-}catch(e){
-status.textContent="Camera permission required";
-}
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode:{
+          ideal:"environment"
+        },
+        width:{
+          ideal:1280
+        },
+        height:{
+          ideal:720
+        },
+        frameRate:{
+          ideal:30,
+          max:30
+        }
+      },
+      audio:false
+    });
+
+    camera.srcObject=stream;
+
+    await camera.play();
+
+    start.classList.add("hidden");
+
+    setStatus("Looking for hands...");
+
+    setupHands();
+
+    startVoice();
+
+  }catch(error){
+
+    console.error(error);
+
+    setStatus("Camera permission needed");
+
+    start.classList.remove("hidden");
+  }
 }
 
 function setupHands(){
-hands=new Hands({
-locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file
-});
 
-hands.setOptions({
-maxNumHands:2,
-modelComplexity:0,
-minDetectionConfidence:.55,
-minTrackingConfidence:.55
-});
+  hands=new Hands({
+    locateFile:file=>{
+      return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file;
+    }
+  });
 
-hands.onResults(results=>{
-handData=[];
+  hands.setOptions({
+    maxNumHands:2,
+    modelComplexity:0,
+    minDetectionConfidence:.58,
+    minTrackingConfidence:.55
+  });
 
-if(results.multiHandLandmarks){
-for(const lm of results.multiHandLandmarks){
+  hands.onResults(results=>{
+    lastResults=results;
+    processing=false;
+    drawHands();
+    processHands();
+  });
 
-const wrist=lm[0];
-const index=lm[8];
-const thumb=lm[4];
-
-const x=(1-wrist.x)*innerWidth;
-const y=wrist.y*innerHeight;
-
-const ix=(1-index.x)*innerWidth;
-const iy=index.y*innerHeight;
-
-const tx=(1-thumb.x)*innerWidth;
-const ty=thumb.y*innerHeight;
-
-const pinchDistance=Math.hypot(ix-tx,iy-ty);
-
-handData.push({
-x,
-y,
-ix,
-iy,
-pinch:pinchDistance<38
-});
-}
+  requestAnimationFrame(handLoop);
 }
 
-updateHands();
-handleHands();
-});
+async function handLoop(){
 
-detectHands();
+  if(
+    hands &&
+    camera.readyState>=2 &&
+    !processing &&
+    camera.currentTime!==lastVideoTime
+  ){
+
+    processing=true;
+    lastVideoTime=camera.currentTime;
+
+    try{
+      await hands.send({
+        image:camera
+      });
+    }catch(error){
+      processing=false;
+    }
+  }
+
+  requestAnimationFrame(handLoop);
 }
 
-async function detectHands(){
-if(camera.readyState>=2){
-await hands.send({image:camera});
+function drawHands(){
+
+  ctx.clearRect(0,0,innerWidth,innerHeight);
+
+  if(!lastResults || !lastResults.multiHandLandmarks) return;
+
+  const handsList=lastResults.multiHandLandmarks;
+
+  for(const landmarks of handsList){
+
+    ctx.strokeStyle="rgba(255,255,255,.65)";
+    ctx.lineWidth=2;
+
+    const connections=[
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [0,9],[9,10],[10,11],[11,12],
+      [0,13],[13,14],[14,15],[15,16],
+      [0,17],[17,18],[18,19],[19,20],
+      [5,9],[9,13],[13,17]
+    ];
+
+    for(const [a,b] of connections){
+
+      const p1=landmarks[a];
+      const p2=landmarks[b];
+
+      const x1=(1-p1.x)*innerWidth;
+      const y1=p1.y*innerHeight;
+      const x2=(1-p2.x)*innerWidth;
+      const y2=p2.y*innerHeight;
+
+      ctx.beginPath();
+      ctx.moveTo(x1,y1);
+      ctx.lineTo(x2,y2);
+      ctx.stroke();
+    }
+
+    for(const p of landmarks){
+
+      const x=(1-p.x)*innerWidth;
+      const y=p.y*innerHeight;
+
+      ctx.beginPath();
+      ctx.arc(x,y,3,0,Math.PI*2);
+      ctx.fillStyle="rgba(255,255,255,.85)";
+      ctx.fill();
+    }
+  }
 }
 
-setTimeout(detectHands,80);
+function distance(a,b){
+
+  const dx=a.x-b.x;
+  const dy=a.y-b.y;
+
+  return Math.sqrt(dx*dx+dy*dy);
 }
 
-function updateHands(){
-handA.style.display="none";
-handB.style.display="none";
+function processHands(){
 
-if(handData[0]){
-handA.style.display="block";
-handA.style.left=handData[0].x+"px";
-handA.style.top=handData[0].y+"px";
+  if(!lastResults || !lastResults.multiHandLandmarks){
+
+    if(handVisible){
+      handVisible=false;
+      setStatus("Looking for hands...");
+    }
+
+    if(!dragging){
+      pinchIndicator.style.display="none";
+    }
+
+    return;
+  }
+
+  const list=lastResults.multiHandLandmarks;
+
+  if(list.length===0){
+
+    if(handVisible){
+      handVisible=false;
+      setStatus("Looking for hands...");
+    }
+
+    return;
+  }
+
+  handVisible=true;
+
+  setStatus(
+    list.length===1
+      ?"1 HAND DETECTED"
+      :"2 HANDS DETECTED"
+  );
+
+  const hand=list[0];
+
+  const thumb=hand[4];
+  const index=hand[8];
+
+  const px=(1-((thumb.x+index.x)/2))*innerWidth;
+  const py=((thumb.y+index.y)/2)*innerHeight;
+
+  const pinchDistance=distance(thumb,index);
+
+  const isPinching=pinchDistance<.055;
+
+  pinchIndicator.style.left=px+"px";
+  pinchIndicator.style.top=py+"px";
+
+  if(isPinching){
+
+    pinchIndicator.style.display="block";
+
+    if(!dragging){
+
+      dragging=true;
+
+      pinchStartX=px;
+      pinchStartY=py;
+
+      screenStartX=screenX;
+      screenStartY=screenY;
+
+      targetX=screenX;
+      targetY=screenY;
+    }
+
+    const dx=px-pinchStartX;
+    const dy=py-pinchStartY;
+
+    targetX=screenStartX+dx;
+    targetY=screenStartY+dy;
+
+    const maxX=innerWidth*.42;
+    const maxY=innerHeight*.42;
+
+    targetX=Math.max(-maxX,Math.min(maxX,targetX));
+    targetY=Math.max(-maxY,Math.min(maxY,targetY));
+
+  }else{
+
+    if(dragging){
+      dragging=false;
+    }
+
+    pinchIndicator.style.display="none";
+  }
+
+  lastHandX=px;
+  lastHandY=py;
 }
 
-if(handData[1]){
-handB.style.display="block";
-handB.style.left=handData[1].x+"px";
-handB.style.top=handData[1].y+"px";
-}
+function showScreen(){
 
-if(handData.length){
-status.textContent=handData.length+" HAND"+(handData.length===1?"":"S")+" DETECTED";
-}else{
-status.textContent="Looking for hands...";
-}
-}
+  screen.classList.add("active");
 
-function insideBar(x,y){
-const r=screenBar.getBoundingClientRect();
+  targetX=0;
+  targetY=0;
 
-return x>=r.left&&
-x<=r.right&&
-y>=r.top&&
-y<=r.bottom;
-}
+  setStatus("YouTube floating screen");
 
-function handleHands(){
-if(!screenOpen||!handData.length)return;
-
-const hand=handData[0];
-
-if(hand.pinch&&!wasPinching){
-
-if(insideBar(hand.x,hand.y)){
-
-const r=screen.getBoundingClientRect();
-
-dragOffsetX=hand.x-r.left;
-dragOffsetY=hand.y-r.top;
-
-dragging=true;
-
-screenBar.classList.add("grabbing");
-}
-}
-
-if(!hand.pinch&&wasPinching){
-
-dragging=false;
-
-screenBar.classList.remove("grabbing");
-}
-
-if(dragging&&hand.pinch){
-
-screenX=clamp(
-((hand.x-dragOffsetX)/innerWidth)*100,
-10,
-90
-);
-
-screenY=clamp(
-((hand.y-dragOffsetY)/innerHeight)*100,
-10,
-90
-);
-
-anchorYaw=deviceYaw;
-anchorPitch=devicePitch;
-
-applyScreenPosition();
-}
-
-wasPinching=hand.pinch;
-}
-
-function applyScreenPosition(){
-
-if(!screenOpen)return;
-
-const yawDifference=deviceYaw-anchorYaw;
-const pitchDifference=devicePitch-anchorPitch;
-
-const xOffset=yawDifference*2.2;
-const yOffset=pitchDifference*2.2;
-
-const finalX=screenX-xOffset;
-const finalY=screenY+yOffset;
-
-screen.style.left=finalX+"%";
-screen.style.top=finalY+"%";
-
-screen.style.transform=
-"translate(-50%,-50%) translateZ(0) rotateY("+(-yawDifference*.04)+"deg) rotateX("+(pitchDifference*.04)+"deg)";
-}
-
-function openYouTube(){
-
-screenOpen=true;
-
-screen.style.display="block";
-
-screenX=50;
-screenY=50;
-
-anchorYaw=deviceYaw;
-anchorPitch=devicePitch;
-
-applyScreenPosition();
-
-voice.textContent="YouTube opened";
-
-setTimeout(()=>{
-voice.textContent='Say "YouTube"';
-},2500);
-}
-
-function closeYouTube(){
-
-screenOpen=false;
-
-screen.style.display="none";
-
-dragging=false;
-wasPinching=false;
-
-screenBar.classList.remove("grabbing");
-}
-
-closeButton.addEventListener("click",closeYouTube);
-
-function handleOrientation(event){
-
-if(event.alpha==null||event.beta==null)return;
-
-if(!orientationEnabled){
-
-deviceYaw=event.alpha;
-devicePitch=event.beta;
-
-orientationEnabled=true;
-
-return;
-}
-
-deviceYaw=event.alpha;
-devicePitch=event.beta;
-
-if(screenOpen&&!dragging){
-applyScreenPosition();
-}
-}
-
-function enableOrientation(){
-
-if(typeof DeviceOrientationEvent!=="undefined"&&
-typeof DeviceOrientationEvent.requestPermission==="function"){
-
-DeviceOrientationEvent.requestPermission()
-.then(result=>{
-if(result==="granted"){
-window.addEventListener(
-"deviceorientation",
-handleOrientation,
-true
-);
-}
-})
-.catch(()=>{});
-
-}else{
-
-window.addEventListener(
-"deviceorientation",
-handleOrientation,
-true
-);
-}
+  try{
+    youtube.contentWindow.postMessage(
+      '{"event":"command","func":"playVideo","args":""}',
+      "*"
+    );
+  }catch(e){}
 }
 
 function startVoice(){
 
-const SpeechRecognition=
-window.SpeechRecognition||
-window.webkitSpeechRecognition;
+  const SpeechRecognition=
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition;
 
-if(!SpeechRecognition){
+  if(!SpeechRecognition){
 
-voice.textContent="Voice control unavailable";
+    voice.textContent="Hand control active";
+    return;
+  }
 
-return;
+  if(recognitionStarted) return;
+
+  recognitionStarted=true;
+
+  recognition=new SpeechRecognition();
+
+  recognition.continuous=true;
+  recognition.interimResults=false;
+  recognition.lang="en-US";
+  recognition.maxAlternatives=1;
+
+  recognition.onresult=event=>{
+
+    const result=
+      event.results[event.results.length-1][0]
+      .transcript
+      .toLowerCase()
+      .trim();
+
+    if(
+      result.includes("youtube") ||
+      result.includes("you tube")
+    ){
+
+      showScreen();
+
+      voice.textContent="YouTube opened";
+
+      setTimeout(()=>{
+        voice.textContent="Say “YouTube”";
+      },1800);
+    }
+  };
+
+  recognition.onerror=()=>{
+    recognitionStarted=false;
+
+    setTimeout(()=>{
+      startVoice();
+    },1500);
+  };
+
+  recognition.onend=()=>{
+    recognitionStarted=false;
+
+    setTimeout(()=>{
+      startVoice();
+    },400);
+  };
+
+  try{
+    recognition.start();
+  }catch(e){}
 }
 
-recognition=new SpeechRecognition();
+start.addEventListener("click",async()=>{
+  await startCamera();
+});
 
-recognition.continuous=true;
-recognition.interimResults=false;
-recognition.lang="en-US";
+document.addEventListener("touchstart",event=>{
 
-recognition.onresult=e=>{
+  if(
+    event.target===screen ||
+    screen.contains(event.target)
+  ){
+    return;
+  }
 
-const text=
-e.results[e.results.length-1][0].transcript
-.toLowerCase()
-.trim();
+},{passive:true});
 
-if(text.includes("youtube")){
+document.addEventListener("visibilitychange",()=>{
 
-openYouTube();
-}
-};
+  if(document.visibilityState==="visible" && stream){
 
-recognition.onend=()=>{
+    camera.play().catch(()=>{});
 
-try{
-recognition.start();
-}catch(e){}
-};
+    if(
+      recognition &&
+      !recognitionStarted
+    ){
+      startVoice();
+    }
+  }
+});
 
-recognition.onerror=()=>{
+window.addEventListener("pagehide",()=>{
 
-setTimeout(()=>{
-try{
-recognition.start();
-}catch(e){}
-},1000);
-};
+  if(stream){
 
-try{
-recognition.start();
-}catch(e){}
-}
+    for(const track of stream.getTracks()){
+      track.stop();
+    }
 
-document.addEventListener("click",enableOrientation,{once:true});
+    stream=null;
+  }
+
+  if(recognition){
+
+    try{
+      recognition.stop();
+    }catch(e){}
+  }
+});
 
 startCamera();
 </script>
