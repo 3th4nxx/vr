@@ -6,7 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Camera</title>
+<title>Vision Camera</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 <style>
 *{
 margin:0;
@@ -22,8 +24,9 @@ background:#000;
 body{
 position:fixed;
 inset:0;
+font-family:Arial,sans-serif;
 }
-video{
+#camera{
 position:fixed;
 inset:0;
 width:100vw;
@@ -33,35 +36,88 @@ height:100dvh;
 object-fit:cover;
 background:#000;
 }
+#overlay{
+position:fixed;
+inset:0;
+width:100%;
+height:100%;
+pointer-events:none;
+}
+.box{
+position:absolute;
+border:3px solid #00ff88;
+border-radius:8px;
+box-shadow:0 0 10px rgba(0,255,136,.6);
+}
+.label{
+position:absolute;
+top:-29px;
+left:-3px;
+background:#00ff88;
+color:#000;
+font-size:14px;
+font-weight:bold;
+padding:5px 8px;
+border-radius:6px 6px 6px 0;
+white-space:nowrap;
+}
+#loading{
+position:fixed;
+inset:0;
+display:flex;
+align-items:center;
+justify-content:center;
+color:white;
+font-size:18px;
+background:#000;
+z-index:10;
+}
+#status{
+position:fixed;
+left:12px;
+bottom:12px;
+color:white;
+font-size:12px;
+background:rgba(0,0,0,.55);
+padding:7px 10px;
+border-radius:8px;
+z-index:5;
+}
 </style>
 </head>
 <body>
 <video id="camera" autoplay playsinline muted></video>
+<canvas id="overlay"></canvas>
+<div id="loading">Loading AI...</div>
+<div id="status">Starting camera...</div>
 <script>
 const video=document.getElementById("camera");
+const canvas=document.getElementById("overlay");
+const ctx=canvas.getContext("2d");
+const loading=document.getElementById("loading");
+const status=document.getElementById("status");
+let model=null;
+let stream=null;
+let detecting=false;
 async function startCamera(){
 try{
-const stream=await navigator.mediaDevices.getUserMedia({
+stream=await navigator.mediaDevices.getUserMedia({
 video:{
 facingMode:{
 exact:"environment"
 },
 width:{
-ideal:3840
+ideal:1920
 },
 height:{
-ideal:2160
-},
-frameRate:{
-ideal:60
+ideal:1080
 }
 },
 audio:false
 });
 video.srcObject=stream;
-try{
 await video.play();
-}catch(e){}
+status.textContent="Camera ready";
 if("wakeLock" in navigator){
 try{
 await navigator.wakeLock.request("screen");
@@ -69,31 +125,100 @@ await navigator.wakeLock.request("screen");
 }
 }catch(error){
 try{
-const stream=await navigator.mediaDevices.getUserMedia({
+stream=await navigator.mediaDevices.getUserMedia({
 video:{
 facingMode:"environment"
 },
 audio:false
 });
 video.srcObject=stream;
+await video.play();
+status.textContent="Camera ready";
 }catch(e){
-document.body.innerHTML="";
+status.textContent="Camera access failed";
 }
 }
 }
-document.addEventListener("click",async()=>{
-if(document.documentElement.requestFullscreen){
+async function loadModel(){
+status.textContent="Loading object detector...";
+model=await cocoSsd.load({
+base:"lite_mobilenet_v2"
+});
+loading.style.display="none";
+status.textContent="Object tracking active";
+detecting=true;
+detectObjects();
+}
+function resizeCanvas(){
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+}
+function drawDetection(prediction){
+const videoWidth=video.videoWidth;
+const videoHeight=video.videoHeight;
+if(!videoWidth||!videoHeight){
+return;
+}
+const screenWidth=window.innerWidth;
+const screenHeight=window.innerHeight;
+const scale=Math.max(
+screenWidth/videoWidth,
+screenHeight/videoHeight
+);
+const displayedWidth=videoWidth*scale;
+const displayedHeight=videoHeight*scale;
+const offsetX=(screenWidth-displayedWidth)/2;
+const offsetY=(screenHeight-displayedHeight)/2;
+const [x,y,width,height]=prediction.bbox;
+const boxX=x*scale+offsetX;
+const boxY=y*scale+offsetY;
+const boxWidth=width*scale;
+const boxHeight=height*scale;
+const box=document.createElement("div");
+box.className="box";
+box.style.left=boxX+"px";
+box.style.top=boxY+"px";
+box.style.width=boxWidth+"px";
+box.style.height=boxHeight+"px";
+const label=document.createElement("div");
+label.className="label";
+label.textContent=
+prediction.class+
+" "+
+Math.round(prediction.score*100)+"%";
+box.appendChild(label);
+canvas.parentElement.appendChild(box);
+}
+async function detectObjects(){
+if(!detecting){
+return;
+}
 try{
+const predictions=await model.detect(video);
+document.querySelectorAll(".box").forEach(box=>{
+box.remove();
+});
+predictions.forEach(prediction=>{
+if(prediction.score>=0.45){
+drawDetection(prediction);
+}
+});
+}catch(error){}
+requestAnimationFrame(detectObjects);
+}
+window.addEventListener("resize",resizeCanvas);
+document.addEventListener("click",async()=>{
+try{
+if(document.documentElement.requestFullscreen){
 await document.documentElement.requestFullscreen();
+}
 }catch(e){}
-}
 });
-startCamera();
-document.addEventListener("visibilitychange",()=>{
-if(document.visibilityState==="visible"){
-startCamera();
-}
-});
+resizeCanvas();
+(async()=>{
+await startCamera();
+await loadModel();
+})();
 </script>
 </body>
 </html>
