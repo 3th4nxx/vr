@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Camera Test</title>
+<title>Automatic Hand Detection</title>
+
 <style>
 html,body{
 margin:0;
@@ -14,27 +15,12 @@ overflow:hidden;
 background:#000;
 }
 
-video{
+#video{
 position:fixed;
 inset:0;
 width:100%;
 height:100%;
 object-fit:cover;
-}
-
-#start{
-position:fixed;
-z-index:10;
-left:50%;
-top:50%;
-transform:translate(-50%,-50%);
-padding:20px 40px;
-font-size:24px;
-font-weight:bold;
-border:0;
-border-radius:20px;
-background:white;
-color:black;
 }
 
 #status{
@@ -43,12 +29,12 @@ z-index:20;
 top:15px;
 left:15px;
 right:15px;
-padding:15px;
-border-radius:15px;
-background:rgba(0,0,0,.75);
+padding:14px;
+border-radius:14px;
+background:rgba(0,0,0,.7);
 color:white;
 font-family:Arial,sans-serif;
-font-size:16px;
+font-size:18px;
 text-align:center;
 }
 </style>
@@ -58,25 +44,85 @@ text-align:center;
 
 <video id="video" autoplay playsinline></video>
 
-<button id="start">START CAMERA</button>
+<div id="status">Starting...</div>
 
-<div id="status">Camera test ready</div>
-
-<script>
+<script type="module">
 
 const video=document.getElementById("video");
-const start=document.getElementById("start");
 const status=document.getElementById("status");
 
-async function startCamera(){
+let detector=null;
+let running=false;
+let lastDetection=0;
 
-status.textContent="Requesting camera permission...";
+async function loadHandTracking(){
 
 try{
 
+status.textContent="Loading hand tracking...";
+
+const module=await import(
+"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm"
+);
+
+const FilesetResolver=module.FilesetResolver;
+const HandLandmarker=module.HandLandmarker;
+
+if(!FilesetResolver || !HandLandmarker){
+
+throw new Error("MediaPipe failed to load");
+
+}
+
+const vision=await FilesetResolver.forVisionTasks(
+"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+);
+
+detector=await HandLandmarker.createFromOptions(
+vision,
+{
+baseOptions:{
+modelAssetPath:
+"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+delegate:"GPU"
+},
+runningMode:"VIDEO",
+numHands:2,
+minHandDetectionConfidence:0.5,
+minHandPresenceConfidence:0.5,
+minTrackingConfidence:0.5
+}
+);
+
+status.textContent="Hand tracking ready";
+
+startCamera();
+
+}catch(error){
+
+console.error(error);
+
+status.textContent="HAND TRACKING ERROR: "+error.message;
+
+}
+
+}
+
+async function startCamera(){
+
+try{
+
+status.textContent="Starting rear camera...";
+
 const stream=await navigator.mediaDevices.getUserMedia({
 video:{
-facingMode:"environment"
+facingMode:"environment",
+width:{
+ideal:1280
+},
+height:{
+ideal:720
+}
 },
 audio:false
 });
@@ -85,22 +131,82 @@ video.srcObject=stream;
 
 await video.play();
 
-start.style.display="none";
+running=true;
 
-status.textContent="REAR CAMERA WORKING";
+status.textContent="Looking for hands...";
+
+requestAnimationFrame(detectHands);
 
 }catch(error){
 
-status.textContent=
-"ERROR: "+error.name+" — "+error.message;
+console.error(error);
 
-console.log(error);
+status.textContent="CAMERA ERROR: "+error.message;
+
+}
+
+}
+
+function detectHands(time){
+
+if(!running){
+
+return;
+
+}
+
+if(detector && video.readyState>=2){
+
+if(time-lastDetection>=80){
+
+lastDetection=time;
+
+try{
+
+const result=detector.detectForVideo(
+video,
+time
+);
+
+const count=result.landmarks
+?result.landmarks.length
+:0;
+
+if(count===0){
+
+status.textContent="Looking for hands...";
+
+}
+
+if(count===1){
+
+status.textContent="1 HAND DETECTED";
+
+}
+
+if(count>=2){
+
+status.textContent="2 HANDS DETECTED";
+
+}
+
+}catch(error){
+
+console.error(error);
+
+status.textContent="DETECTION ERROR: "+error.message;
 
 }
 
 }
 
-start.addEventListener("click",startCamera);
+}
+
+requestAnimationFrame(detectHands);
+
+}
+
+loadHandTracking();
 
 </script>
 
