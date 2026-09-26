@@ -6,9 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Vision Camera</title>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<title>Hand Beat</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22"></script>
 <style>
 *{
 margin:0;
@@ -25,87 +24,155 @@ body{
 position:fixed;
 inset:0;
 font-family:Arial,sans-serif;
+touch-action:none;
 }
 #camera{
 position:fixed;
 inset:0;
-width:100vw;
-height:100vh;
-width:100dvw;
-height:100dvh;
+width:100%;
+height:100%;
 object-fit:cover;
-background:#000;
+transform:scaleX(-1);
 }
-#overlay{
+#game{
 position:fixed;
 inset:0;
 width:100%;
 height:100%;
 pointer-events:none;
 }
-.box{
-position:absolute;
-border:3px solid #00ff88;
-border-radius:8px;
-box-shadow:0 0 10px rgba(0,255,136,.6);
-}
-.label{
-position:absolute;
-top:-29px;
-left:-3px;
-background:#00ff88;
-color:#000;
-font-size:14px;
+#ui{
+position:fixed;
+top:18px;
+left:50%;
+transform:translateX(-50%);
+color:white;
+font-size:22px;
 font-weight:bold;
-padding:5px 8px;
-border-radius:6px 6px 6px 0;
-white-space:nowrap;
+text-align:center;
+z-index:5;
+text-shadow:0 2px 8px #000;
 }
-#loading{
+#score{
+font-size:30px;
+}
+#combo{
+font-size:18px;
+margin-top:4px;
+}
+#start{
 position:fixed;
 inset:0;
 display:flex;
 align-items:center;
 justify-content:center;
+flex-direction:column;
+background:rgba(0,0,0,.72);
 color:white;
-font-size:18px;
+z-index:20;
+text-align:center;
+}
+#start h1{
+font-size:42px;
+margin-bottom:10px;
+}
+#start p{
+font-size:16px;
+margin-bottom:25px;
+opacity:.8;
+}
+#start button{
+border:0;
+border-radius:14px;
+padding:16px 34px;
+font-size:20px;
+font-weight:bold;
+background:white;
+color:#000;
+}
+#loading{
+position:fixed;
+inset:0;
+display:none;
+align-items:center;
+justify-content:center;
 background:#000;
-z-index:10;
+color:white;
+font-size:20px;
+z-index:30;
 }
 #status{
 position:fixed;
-left:12px;
 bottom:12px;
+left:50%;
+transform:translateX(-50%);
 color:white;
-font-size:12px;
+font-size:13px;
 background:rgba(0,0,0,.55);
-padding:7px 10px;
-border-radius:8px;
-z-index:5;
+padding:7px 12px;
+border-radius:10px;
+z-index:6;
 }
 </style>
 </head>
 <body>
 <video id="camera" autoplay playsinline muted></video>
-<canvas id="overlay"></canvas>
-<div id="loading">Loading AI...</div>
-<div id="status">Starting camera...</div>
+<canvas id="game"></canvas>
+<div id="ui">
+<div id="score">0</div>
+<div id="combo">COMBO 0</div>
+</div>
+<div id="status">Waiting for hands...</div>
+<div id="start">
+<h1>HAND BEAT</h1>
+<p>Move your hands like sabers.<br>Slash the blocks before they reach you.</p>
+<button id="startButton">START</button>
+</div>
+<div id="loading">Loading hand tracking...</div>
 <script>
+const {HandLandmarker,FilesetResolver}=vision;
 const video=document.getElementById("camera");
-const canvas=document.getElementById("overlay");
+const canvas=document.getElementById("game");
 const ctx=canvas.getContext("2d");
+const startScreen=document.getElementById("start");
+const startButton=document.getElementById("startButton");
 const loading=document.getElementById("loading");
-const status=document.getElementById("status");
-let model=null;
+const scoreElement=document.getElementById("score");
+const comboElement=document.getElementById("combo");
+const statusElement=document.getElementById("status");
+let handLandmarker=null;
 let stream=null;
-let detecting=false;
+let running=false;
+let lastVideoTime=-1;
+let hands={
+Left:null,
+Right:null
+};
+let previousHands={
+Left:null,
+Right:null
+};
+let score=0;
+let combo=0;
+let blocks=[];
+let particles=[];
+let lastSpawn=0;
+let spawnDelay=850;
+let lastTime=0;
+const colors={
+Left:"#ff315c",
+Right:"#35a7ff"
+};
+function resize(){
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+}
+window.addEventListener("resize",resize);
+resize();
 async function startCamera(){
-try{
 stream=await navigator.mediaDevices.getUserMedia({
 video:{
-facingMode:{
-exact:"environment"
-},
+facingMode:"environment",
 width:{
 ideal:1920
 },
@@ -117,108 +184,304 @@ audio:false
 });
 video.srcObject=stream;
 await video.play();
-status.textContent="Camera ready";
-if("wakeLock" in navigator){
+}
+async function loadHandTracking(){
+loading.style.display="flex";
+const fileset=await FilesetResolver.forVisionTasks(
+"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+);
+handLandmarker=await HandLandmarker.createFromOptions(
+fileset,
+{
+baseOptions:{
+modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+delegate:"GPU"
+},
+runningMode:"VIDEO",
+numHands:2,
+minHandDetectionConfidence:.55,
+minHandPresenceConfidence:.55,
+minTrackingConfidence:.55
+}
+);
+loading.style.display="none";
+}
+function screenPoint(point){
+return{
+x:(1-point.x)*canvas.width,
+y:point.y*canvas.height
+};
+}
+function distance(a,b){
+return Math.hypot(a.x-b.x,a.y-b.y);
+}
+function handCenter(landmarks){
+const wrist=screenPoint(landmarks[0]);
+const middle=screenPoint(landmarks[9]);
+return{
+x:(wrist.x+middle.x)/2,
+y:(wrist.y+middle.y)/2
+};
+}
+function detectHands(){
+if(!handLandmarker||video.readyState<2){
+return;
+}
+if(video.currentTime===lastVideoTime){
+return;
+}
+lastVideoTime=video.currentTime;
+const result=handLandmarker.detectForVideo(
+video,
+performance.now()
+);
+hands.Left=null;
+hands.Right=null;
+if(!result.landmarks){
+return;
+}
+for(let i=0;i<result.landmarks.length;i++){
+const landmarks=result.landmarks[i];
+const label=result.handednesses[i][0].categoryName;
+const center=handCenter(landmarks);
+hands[label]={
+landmarks,
+center
+};
+}
+}
+function spawnBlock(){
+const side=Math.random()<.5?"Left":"Right";
+const laneX=side==="Left"
+?canvas.width*.30
+:canvas.width*.70;
+const laneY=
+canvas.height*(.25+Math.random()*.5);
+blocks.push({
+x:laneX,
+y:laneY,
+size:55,
+side,
+rotation:(Math.random()-.5)*.5,
+speed:canvas.height*.42,
+life:0,
+hit:false
+});
+}
+function slashBlock(hand,block){
+if(!hand){
+return false;
+}
+const dx=hand.center.x-block.x;
+const dy=hand.center.y-block.y;
+const d=Math.sqrt(dx*dx+dy*dy);
+return d<block.size*1.5;
+}
+function destroyBlock(block,index){
+score+=100;
+combo++;
+scoreElement.textContent=score;
+comboElement.textContent="COMBO "+combo;
+for(let i=0;i<22;i++){
+particles.push({
+x:block.x,
+y:block.y,
+vx:(Math.random()-.5)*600,
+vy:(Math.random()-.5)*600,
+life:1,
+size:Math.random()*8+3,
+color:colors[block.side]
+});
+}
+blocks.splice(index,1);
+}
+function updateBlocks(dt){
+for(let i=blocks.length-1;i>=0;i--){
+const block=blocks[i];
+block.life+=dt;
+block.y+=block.speed*dt;
+const hand=hands[block.side];
+if(slashBlock(hand,block)){
+destroyBlock(block,i);
+continue;
+}
+if(block.y>canvas.height+100){
+blocks.splice(i,1);
+combo=0;
+comboElement.textContent="COMBO 0";
+}
+}
+}
+function updateParticles(dt){
+for(let i=particles.length-1;i>=0;i--){
+const p=particles[i];
+p.life-=dt;
+p.x+=p.vx*dt;
+p.y+=p.vy*dt;
+p.vy+=500*dt;
+if(p.life<=0){
+particles.splice(i,1);
+}
+}
+}
+function drawBlock(block){
+ctx.save();
+ctx.translate(block.x,block.y);
+ctx.rotate(block.rotation);
+ctx.shadowBlur=25;
+ctx.shadowColor=colors[block.side];
+ctx.fillStyle=colors[block.side];
+ctx.beginPath();
+ctx.moveTo(0,-block.size);
+ctx.lineTo(block.size,0);
+ctx.lineTo(0,block.size);
+ctx.lineTo(-block.size,0);
+ctx.closePath();
+ctx.fill();
+ctx.shadowBlur=0;
+ctx.fillStyle="white";
+ctx.beginPath();
+ctx.moveTo(0,-block.size*.55);
+ctx.lineTo(block.size*.55,0);
+ctx.lineTo(0,block.size*.55);
+ctx.lineTo(-block.size*.55,0);
+ctx.closePath();
+ctx.fill();
+ctx.restore();
+}
+function drawHand(hand,side){
+if(!hand){
+return;
+}
+const p=hand.center;
+ctx.save();
+ctx.strokeStyle=colors[side];
+ctx.lineWidth=10;
+ctx.lineCap="round";
+ctx.shadowBlur=25;
+ctx.shadowColor=colors[side];
+const previous=previousHands[side];
+if(previous){
+ctx.beginPath();
+ctx.moveTo(previous.x,previous.y);
+ctx.lineTo(p.x,p.y);
+ctx.stroke();
+}
+ctx.fillStyle=colors[side];
+ctx.beginPath();
+ctx.arc(p.x,p.y,13,0,Math.PI*2);
+ctx.fill();
+ctx.restore();
+}
+function drawParticles(){
+for(const p of particles){
+ctx.save();
+ctx.globalAlpha=Math.max(0,p.life);
+ctx.fillStyle=p.color;
+ctx.shadowBlur=15;
+ctx.shadowColor=p.color;
+ctx.beginPath();
+ctx.arc(
+p.x,
+p.y,
+p.size,
+0,
+Math.PI*2
+);
+ctx.fill();
+ctx.restore();
+}
+}
+function drawArena(){
+ctx.save();
+const centerX=canvas.width/2;
+const horizon=canvas.height*.25;
+ctx.strokeStyle="rgba(255,255,255,.15)";
+ctx.lineWidth=2;
+for(let i=0;i<8;i++){
+const x=centerX+(i-4)*canvas.width*.12;
+ctx.beginPath();
+ctx.moveTo(centerX,horizon);
+ctx.lineTo(x,canvas.height);
+ctx.stroke();
+}
+for(let i=0;i<7;i++){
+const y=horizon+
+Math.pow(i/6,1.8)*(canvas.height-horizon);
+ctx.beginPath();
+ctx.moveTo(0,y);
+ctx.lineTo(canvas.width,y);
+ctx.stroke();
+}
+ctx.restore();
+}
+function render(){
+ctx.clearRect(0,0,canvas.width,canvas.height);
+drawArena();
+for(const block of blocks){
+drawBlock(block);
+}
+drawParticles();
+drawHand(hands.Left,"Left");
+drawHand(hands.Right,"Right");
+if(hands.Left){
+previousHands.Left={...hands.Left.center};
+}
+if(hands.Right){
+previousHands.Right={...hands.Right.center};
+}
+}
+function gameLoop(time){
+if(!running){
+return;
+}
+const dt=Math.min((time-lastTime)/1000,.05);
+lastTime=time;
+detectHands();
+if(time-lastSpawn>spawnDelay){
+spawnBlock();
+lastSpawn=time;
+}
+updateBlocks(dt);
+updateParticles(dt);
+render();
+requestAnimationFrame(gameLoop);
+}
+async function startGame(){
+startScreen.style.display="none";
+statusElement.textContent="Starting camera...";
 try{
-await navigator.wakeLock.request("screen");
+await startCamera();
+statusElement.textContent="Loading hand tracking...";
+await loadHandTracking();
+statusElement.textContent="Show both hands";
+running=true;
+lastTime=performance.now();
+lastSpawn=performance.now();
+requestAnimationFrame(gameLoop);
+if(document.documentElement.requestFullscreen){
+try{
+await document.documentElement.requestFullscreen();
 }catch(e){}
 }
 }catch(error){
+statusElement.textContent="Camera or hand tracking failed";
+console.error(error);
+}
+}
+startButton.addEventListener("click",startGame);
+document.addEventListener("visibilitychange",async()=>{
+if(document.visibilityState==="visible"&&running){
 try{
-stream=await navigator.mediaDevices.getUserMedia({
-video:{
-facingMode:"environment"
-},
-audio:false
-});
-video.srcObject=stream;
-await video.play();
-status.textContent="Camera ready";
-}catch(e){
-status.textContent="Camera access failed";
+if(stream){
+const tracks=stream.getVideoTracks();
+if(tracks.length&&!tracks[0].enabled){
+tracks[0].enabled=true;
 }
-}
-}
-async function loadModel(){
-status.textContent="Loading object detector...";
-model=await cocoSsd.load({
-base:"lite_mobilenet_v2"
-});
-loading.style.display="none";
-status.textContent="Object tracking active";
-detecting=true;
-detectObjects();
-}
-function resizeCanvas(){
-canvas.width=window.innerWidth;
-canvas.height=window.innerHeight;
-}
-function drawDetection(prediction){
-const videoWidth=video.videoWidth;
-const videoHeight=video.videoHeight;
-if(!videoWidth||!videoHeight){
-return;
-}
-const screenWidth=window.innerWidth;
-const screenHeight=window.innerHeight;
-const scale=Math.max(
-screenWidth/videoWidth,
-screenHeight/videoHeight
-);
-const displayedWidth=videoWidth*scale;
-const displayedHeight=videoHeight*scale;
-const offsetX=(screenWidth-displayedWidth)/2;
-const offsetY=(screenHeight-displayedHeight)/2;
-const [x,y,width,height]=prediction.bbox;
-const boxX=x*scale+offsetX;
-const boxY=y*scale+offsetY;
-const boxWidth=width*scale;
-const boxHeight=height*scale;
-const box=document.createElement("div");
-box.className="box";
-box.style.left=boxX+"px";
-box.style.top=boxY+"px";
-box.style.width=boxWidth+"px";
-box.style.height=boxHeight+"px";
-const label=document.createElement("div");
-label.className="label";
-label.textContent=
-prediction.class+
-" "+
-Math.round(prediction.score*100)+"%";
-box.appendChild(label);
-canvas.parentElement.appendChild(box);
-}
-async function detectObjects(){
-if(!detecting){
-return;
-}
-try{
-const predictions=await model.detect(video);
-document.querySelectorAll(".box").forEach(box=>{
-box.remove();
-});
-predictions.forEach(prediction=>{
-if(prediction.score>=0.45){
-drawDetection(prediction);
-}
-});
-}catch(error){}
-requestAnimationFrame(detectObjects);
-}
-window.addEventListener("resize",resizeCanvas);
-document.addEventListener("click",async()=>{
-try{
-if(document.documentElement.requestFullscreen){
-await document.documentElement.requestFullscreen();
 }
 }catch(e){}
+}
 });
-resizeCanvas();
-(async()=>{
-await startCamera();
-await loadModel();
-})();
 </script>
 </body>
 </html>
