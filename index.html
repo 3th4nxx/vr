@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>Hand Detection</title>
+<title>Camera Saber</title>
 
 <style>
 html,body{
@@ -16,26 +16,52 @@ background:#000;
 }
 
 #video{
+display:none;
+}
+
+#game{
 position:fixed;
-inset:0;
+left:0;
+top:0;
 width:100%;
 height:100%;
-object-fit:cover;
+}
+
+#hud{
+position:fixed;
+z-index:20;
+top:12px;
+left:50%;
+transform:translateX(-50%);
+color:white;
+font-family:Arial,sans-serif;
+text-align:center;
+pointer-events:none;
+text-shadow:0 2px 5px #000;
+}
+
+#score{
+font-size:25px;
+font-weight:bold;
+}
+
+#combo{
+font-size:18px;
+margin-top:4px;
 }
 
 #status{
 position:fixed;
-z-index:10;
-top:15px;
-left:15px;
-right:15px;
-padding:14px;
-border-radius:14px;
-background:rgba(0,0,0,.75);
+z-index:20;
+bottom:15px;
+left:50%;
+transform:translateX(-50%);
 color:white;
 font-family:Arial,sans-serif;
-font-size:18px;
+font-size:15px;
 text-align:center;
+pointer-events:none;
+text-shadow:0 2px 5px #000;
 }
 </style>
 
@@ -47,20 +73,70 @@ text-align:center;
 
 <video id="video" autoplay playsinline muted></video>
 
-<div id="status">Loading hand tracking...</div>
+<canvas id="game"></canvas>
+
+<div id="hud">
+<div id="score">SCORE 0</div>
+<div id="combo">COMBO 0</div>
+</div>
+
+<div id="status">Starting...</div>
 
 <script>
 
 const video=document.getElementById("video");
-const status=document.getElementById("status");
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+const scoreText=document.getElementById("score");
+const comboText=document.getElementById("combo");
+const statusText=document.getElementById("status");
 
 let hands;
+let stream;
 let running=false;
 let lastDetection=0;
+let lastFrame=0;
+let lastSpawn=0;
 
-function createHandDetector(){
+let score=0;
+let combo=0;
+let misses=0;
 
-try{
+let handData=[];
+let blocks=[];
+let particles=[];
+
+let width=0;
+let height=0;
+
+const blockColors=[
+"#ff304f",
+"#27e8ff"
+];
+
+function resize(){
+
+width=window.innerWidth;
+height=window.innerHeight;
+
+const dpr=Math.min(window.devicePixelRatio||1,2);
+
+canvas.width=width*dpr;
+canvas.height=height*dpr;
+
+canvas.style.width=width+"px";
+canvas.style.height=height+"px";
+
+ctx.setTransform(dpr,0,0,dpr,0,0);
+
+}
+
+window.addEventListener("resize",resize);
+
+resize();
+
+function setupHands(){
 
 hands=new Hands({
 locateFile:function(file){
@@ -77,41 +153,26 @@ minTrackingConfidence:0.5
 
 hands.onResults(function(results){
 
-const count=results.multiHandLandmarks
-?results.multiHandLandmarks.length
-:0;
+handData=[];
 
-if(count===0){
+if(results.multiHandLandmarks){
 
-status.textContent="Looking for hands...";
+for(let i=0;i<results.multiHandLandmarks.length;i++){
+
+const hand=results.multiHandLandmarks[i];
+
+handData.push({
+wrist:hand[0],
+index:hand[8],
+middle:hand[9],
+thumb:hand[4]
+});
 
 }
-
-if(count===1){
-
-status.textContent="1 HAND DETECTED";
-
-}
-
-if(count>=2){
-
-status.textContent="2 HANDS DETECTED";
 
 }
 
 });
-
-status.textContent="Hand tracking ready";
-
-startCamera();
-
-}catch(error){
-
-status.textContent="HAND TRACKING ERROR: "+error.message;
-
-console.error(error);
-
-}
 
 }
 
@@ -119,9 +180,9 @@ async function startCamera(){
 
 try{
 
-status.textContent="Starting rear camera...";
+statusText.textContent="Starting camera...";
 
-const stream=await navigator.mediaDevices.getUserMedia({
+stream=await navigator.mediaDevices.getUserMedia({
 video:{
 facingMode:"environment",
 width:{
@@ -140,13 +201,13 @@ await video.play();
 
 running=true;
 
-status.textContent="Looking for hands...";
+statusText.textContent="SHOW YOUR HANDS";
 
-detect();
+requestAnimationFrame(gameLoop);
 
 }catch(error){
 
-status.textContent="CAMERA ERROR: "+error.name+" - "+error.message;
+statusText.textContent="CAMERA ERROR: "+error.name;
 
 console.error(error);
 
@@ -154,19 +215,11 @@ console.error(error);
 
 }
 
-async function detect(){
+async function detectHands(){
 
-if(!running){
-
+if(!hands||video.readyState<2){
 return;
-
 }
-
-const now=performance.now();
-
-if(now-lastDetection>100){
-
-lastDetection=now;
 
 try{
 
@@ -182,19 +235,539 @@ console.error(error);
 
 }
 
-requestAnimationFrame(detect);
+function spawnBlock(){
+
+const lane=Math.floor(Math.random()*6);
+
+const side=lane%2;
+
+const lanePosition=lane<3
+?lane
+:lane-3;
+
+const xPositions=[
+0.22,
+0.50,
+0.78
+];
+
+const yPositions=[
+0.35,
+0.52,
+0.69
+];
+
+blocks.push({
+x:xPositions[lanePosition],
+y:yPositions[Math.floor(Math.random()*3)],
+z:1,
+size:0.07,
+side:side,
+rotation:(Math.random()-0.5)*0.6,
+hit:false,
+color:blockColors[side]
+});
 
 }
 
-if(typeof Hands==="undefined"){
+function updateBlocks(dt){
 
-status.textContent="MediaPipe library failed to load";
+for(let i=blocks.length-1;i>=0;i--){
+
+const b=blocks[i];
+
+b.z-=dt*0.00045;
+
+if(b.z<0.05){
+
+if(!b.hit){
+
+misses++;
+
+combo=0;
+
+}
+
+blocks.splice(i,1);
+
+}
+
+}
+
+}
+
+function getHandPositions(){
+
+const result=[];
+
+for(let i=0;i<handData.length;i++){
+
+const h=handData[i];
+
+const x=(h.wrist.x+h.index.x)/2;
+const y=(h.wrist.y+h.index.y)/2;
+
+const dx=h.index.x-h.wrist.x;
+const dy=h.index.y-h.wrist.y;
+
+const length=Math.sqrt(dx*dx+dy*dy);
+
+result.push({
+x:x,
+y:y,
+dx:dx,
+dy:dy,
+length:length,
+hand:i
+});
+
+}
+
+return result;
+
+}
+
+function checkHits(){
+
+const swords=getHandPositions();
+
+for(let i=blocks.length-1;i>=0;i--){
+
+const b=blocks[i];
+
+if(b.hit){
+continue;
+}
+
+const bx=b.x;
+const by=b.y;
+
+const depth=1-b.z;
+
+const bx2=0.5+(bx-0.5)*(1+depth*2.4);
+const by2=0.5+(by-0.5)*(1+depth*2.4);
+
+const hitSize=b.size*(1+depth*2.8);
+
+for(let s=0;s<swords.length;s++){
+
+const sword=swords[s];
+
+const sx=sword.x;
+const sy=sword.y;
+
+const distance=Math.sqrt(
+(sx-bx2)*(sx-bx2)+
+(sy-by2)*(sy-by2)
+);
+
+const correctSide=
+b.side===0
+?sx<0.5
+:sx>=0.5;
+
+if(distance<hitSize*1.5 && correctSide){
+
+b.hit=true;
+
+score+=100+combo*10;
+
+combo++;
+
+createExplosion(
+bx2,
+by2,
+b.color
+);
+
+blocks.splice(i,1);
+
+break;
+
+}
+
+}
+
+}
+
+}
+
+function createExplosion(x,y,color){
+
+for(let i=0;i<15;i++){
+
+particles.push({
+x:x,
+y:y,
+vx:(Math.random()-0.5)*0.015,
+vy:(Math.random()-0.5)*0.015,
+life:1,
+color:color
+});
+
+}
+
+}
+
+function updateParticles(dt){
+
+for(let i=particles.length-1;i>=0;i--){
+
+const p=particles[i];
+
+p.x+=p.vx*dt;
+p.y+=p.vy*dt;
+
+p.life-=dt*0.002;
+
+if(p.life<=0){
+
+particles.splice(i,1);
+
+}
+
+}
+
+}
+
+function drawCamera(){
+
+if(video.readyState<2){
+return;
+}
+
+ctx.save();
+
+ctx.clearRect(0,0,width,height);
+
+const half=width/2;
+
+drawVideoEye(0,0,half,height);
+drawVideoEye(half,0,half,height);
+
+ctx.restore();
+
+}
+
+function drawVideoEye(x,y,w,h){
+
+const vw=video.videoWidth;
+const vh=video.videoHeight;
+
+if(!vw||!vh){
+return;
+}
+
+const videoRatio=vw/vh;
+const eyeRatio=w/h;
+
+let sx=0;
+let sy=0;
+let sw=vw;
+let sh=vh;
+
+if(videoRatio>eyeRatio){
+
+sw=vh*eyeRatio;
+sx=(vw-sw)/2;
 
 }else{
 
-createHandDetector();
+sh=vw/eyeRatio;
+sy=(vh-sh)/2;
 
 }
+
+ctx.drawImage(
+video,
+sx,
+sy,
+sw,
+sh,
+x,
+y,
+w,
+h
+);
+
+}
+
+function drawDivider(){
+
+ctx.fillStyle="rgba(255,255,255,0.08)";
+
+ctx.fillRect(
+width/2-1,
+0,
+2,
+height
+);
+
+}
+
+function drawBlocks(){
+
+const half=width/2;
+
+for(const b of blocks){
+
+const depth=1-b.z;
+
+const size=
+b.size*
+Math.min(width,height)*
+(0.5+depth*3.2);
+
+const centerX=
+b.x<0.5
+?half*(b.x*2)
+:half+half*((b.x-0.5)*2);
+
+const centerY=
+height*(0.5+(b.y-0.5)*(0.6+depth*2.4));
+
+for(let eye=0;eye<2;eye++){
+
+let eyeX=eye===0?0:half;
+
+let localX=
+b.x<0.5
+?half*(b.x*2)
+:half*((b.x-0.5)*2);
+
+if(b.side===0){
+localX=half*0.5;
+}else{
+localX=half*0.5;
+}
+
+const px=eyeX+localX;
+
+ctx.save();
+
+ctx.translate(px,centerY);
+
+ctx.rotate(b.rotation);
+
+ctx.fillStyle=b.color;
+
+ctx.shadowColor=b.color;
+ctx.shadowBlur=18;
+
+ctx.fillRect(
+-size/2,
+-size/2,
+size,
+size
+);
+
+ctx.shadowBlur=0;
+
+ctx.fillStyle="rgba(255,255,255,0.85)";
+
+ctx.beginPath();
+
+ctx.moveTo(0,-size*0.28);
+ctx.lineTo(size*0.2,0);
+ctx.lineTo(0,size*0.28);
+ctx.lineTo(-size*0.2,0);
+
+ctx.closePath();
+
+ctx.fill();
+
+ctx.restore();
+
+}
+
+}
+
+}
+
+function drawSabers(){
+
+const swords=getHandPositions();
+
+const half=width/2;
+
+for(const sword of swords){
+
+const side=sword.hand===0?0:1;
+
+for(let eye=0;eye<2;eye++){
+
+const eyeX=eye===0?0:half;
+
+const x=eyeX+sword.x*half;
+
+const y=sword.y*height;
+
+const endX=x+sword.dx*half*2.8;
+const endY=y+sword.dy*height*2.8;
+
+const color=side===0
+?"#27e8ff"
+:"#ff304f";
+
+ctx.save();
+
+ctx.lineCap="round";
+
+ctx.strokeStyle=color;
+
+ctx.shadowColor=color;
+
+ctx.shadowBlur=20;
+
+ctx.lineWidth=8;
+
+ctx.beginPath();
+
+ctx.moveTo(x,y);
+
+ctx.lineTo(endX,endY);
+
+ctx.stroke();
+
+ctx.shadowBlur=0;
+
+ctx.strokeStyle="white";
+
+ctx.lineWidth=3;
+
+ctx.beginPath();
+
+ctx.moveTo(x,y);
+
+ctx.lineTo(endX,endY);
+
+ctx.stroke();
+
+ctx.restore();
+
+}
+
+}
+
+}
+
+function drawParticles(){
+
+const half=width/2;
+
+for(const p of particles){
+
+for(let eye=0;eye<2;eye++){
+
+const x=(eye===0?0:half)+p.x*half;
+const y=p.y*height;
+
+ctx.globalAlpha=Math.max(0,p.life);
+
+ctx.fillStyle=p.color;
+
+ctx.beginPath();
+
+ctx.arc(
+x,
+y,
+5+p.life*5,
+0,
+Math.PI*2
+);
+
+ctx.fill();
+
+}
+
+}
+
+ctx.globalAlpha=1;
+
+}
+
+function drawCenterLine(){
+
+ctx.strokeStyle="rgba(255,255,255,0.12)";
+ctx.lineWidth=1;
+
+ctx.beginPath();
+
+ctx.moveTo(width/2,0);
+ctx.lineTo(width/2,height);
+
+ctx.stroke();
+
+}
+
+function updateHUD(){
+
+scoreText.textContent="SCORE "+score;
+comboText.textContent="COMBO "+combo;
+
+if(handData.length===0){
+
+statusText.textContent="SHOW YOUR HANDS";
+
+}else if(handData.length===1){
+
+statusText.textContent="1 SABER ACTIVE";
+
+}else{
+
+statusText.textContent="2 SABERS ACTIVE";
+
+}
+
+}
+
+async function gameLoop(time){
+
+if(!running){
+return;
+}
+
+const dt=Math.min(
+time-lastFrame,
+50
+);
+
+lastFrame=time;
+
+if(time-lastDetection>100){
+
+lastDetection=time;
+
+detectHands();
+
+}
+
+if(time-lastSpawn>750){
+
+lastSpawn=time;
+
+spawnBlock();
+
+}
+
+updateBlocks(dt);
+updateParticles(dt);
+checkHits();
+
+drawCamera();
+drawBlocks();
+drawSabers();
+drawParticles();
+drawDivider();
+
+updateHUD();
+
+requestAnimationFrame(gameLoop);
+
+}
+
+setupHands();
+startCamera();
 
 </script>
 
