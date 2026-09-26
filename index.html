@@ -16,15 +16,19 @@ background:#000;
 }
 
 #video{
-display:none;
+position:fixed;
+inset:0;
+width:100%;
+height:100%;
+object-fit:cover;
 }
 
 #game{
 position:fixed;
-left:0;
-top:0;
+inset:0;
 width:100%;
 height:100%;
+pointer-events:none;
 }
 
 #hud{
@@ -93,7 +97,6 @@ const comboText=document.getElementById("combo");
 const statusText=document.getElementById("status");
 
 let hands;
-let stream;
 let running=false;
 let lastDetection=0;
 let lastFrame=0;
@@ -109,11 +112,6 @@ let particles=[];
 
 let width=0;
 let height=0;
-
-const blockColors=[
-"#ff304f",
-"#27e8ff"
-];
 
 function resize(){
 
@@ -164,8 +162,7 @@ const hand=results.multiHandLandmarks[i];
 handData.push({
 wrist:hand[0],
 index:hand[8],
-middle:hand[9],
-thumb:hand[4]
+middle:hand[9]
 });
 
 }
@@ -182,7 +179,7 @@ try{
 
 statusText.textContent="Starting camera...";
 
-stream=await navigator.mediaDevices.getUserMedia({
+const stream=await navigator.mediaDevices.getUserMedia({
 video:{
 facingMode:"environment",
 width:{
@@ -239,33 +236,29 @@ function spawnBlock(){
 
 const lane=Math.floor(Math.random()*6);
 
-const side=lane%2;
-
-const lanePosition=lane<3
-?lane
-:lane-3;
-
 const xPositions=[
-0.22,
-0.50,
-0.78
+0.15,
+0.35,
+0.5,
+0.65,
+0.85
 ];
 
 const yPositions=[
-0.35,
-0.52,
-0.69
+0.3,
+0.5,
+0.7
 ];
 
 blocks.push({
-x:xPositions[lanePosition],
-y:yPositions[Math.floor(Math.random()*3)],
+x:xPositions[Math.floor(Math.random()*xPositions.length)],
+y:yPositions[Math.floor(Math.random()*yPositions.length)],
 z:1,
 size:0.07,
-side:side,
-rotation:(Math.random()-0.5)*0.6,
+side:lane%2,
+rotation:(Math.random()-0.5)*0.8,
 hit:false,
-color:blockColors[side]
+color:lane%2===0?"#ff304f":"#27e8ff"
 });
 
 }
@@ -278,12 +271,11 @@ const b=blocks[i];
 
 b.z-=dt*0.00045;
 
-if(b.z<0.05){
+if(b.z<0.03){
 
 if(!b.hit){
 
 misses++;
-
 combo=0;
 
 }
@@ -310,14 +302,11 @@ const y=(h.wrist.y+h.index.y)/2;
 const dx=h.index.x-h.wrist.x;
 const dy=h.index.y-h.wrist.y;
 
-const length=Math.sqrt(dx*dx+dy*dy);
-
 result.push({
 x:x,
 y:y,
 dx:dx,
 dy:dy,
-length:length,
 hand:i
 });
 
@@ -339,34 +328,21 @@ if(b.hit){
 continue;
 }
 
-const bx=b.x;
-const by=b.y;
-
 const depth=1-b.z;
 
-const bx2=0.5+(bx-0.5)*(1+depth*2.4);
-const by2=0.5+(by-0.5)*(1+depth*2.4);
+const bx=0.5+(b.x-0.5)*(1+depth*2.4);
+const by=0.5+(b.y-0.5)*(1+depth*2.4);
 
 const hitSize=b.size*(1+depth*2.8);
 
-for(let s=0;s<swords.length;s++){
-
-const sword=swords[s];
-
-const sx=sword.x;
-const sy=sword.y;
+for(const sword of swords){
 
 const distance=Math.sqrt(
-(sx-bx2)*(sx-bx2)+
-(sy-by2)*(sy-by2)
+(sword.x-bx)*(sword.x-bx)+
+(sword.y-by)*(sword.y-by)
 );
 
-const correctSide=
-b.side===0
-?sx<0.5
-:sx>=0.5;
-
-if(distance<hitSize*1.5 && correctSide){
+if(distance<hitSize*1.6){
 
 b.hit=true;
 
@@ -375,8 +351,8 @@ score+=100+combo*10;
 combo++;
 
 createExplosion(
-bx2,
-by2,
+bx,
+by,
 b.color
 );
 
@@ -394,7 +370,7 @@ break;
 
 function createExplosion(x,y,color){
 
-for(let i=0;i<15;i++){
+for(let i=0;i<18;i++){
 
 particles.push({
 x:x,
@@ -436,20 +412,12 @@ if(video.readyState<2){
 return;
 }
 
-ctx.save();
-
-ctx.clearRect(0,0,width,height);
-
-const half=width/2;
-
-drawVideoEye(0,0,half,height);
-drawVideoEye(half,0,half,height);
-
-ctx.restore();
-
-}
-
-function drawVideoEye(x,y,w,h){
+ctx.clearRect(
+0,
+0,
+width,
+height
+);
 
 const vw=video.videoWidth;
 const vh=video.videoHeight;
@@ -459,21 +427,21 @@ return;
 }
 
 const videoRatio=vw/vh;
-const eyeRatio=w/h;
+const screenRatio=width/height;
 
 let sx=0;
 let sy=0;
 let sw=vw;
 let sh=vh;
 
-if(videoRatio>eyeRatio){
+if(videoRatio>screenRatio){
 
-sw=vh*eyeRatio;
+sw=vh*screenRatio;
 sx=(vw-sw)/2;
 
 }else{
 
-sh=vw/eyeRatio;
+sh=vw/screenRatio;
 sy=(vh-sh)/2;
 
 }
@@ -484,30 +452,15 @@ sx,
 sy,
 sw,
 sh,
-x,
-y,
-w,
-h
-);
-
-}
-
-function drawDivider(){
-
-ctx.fillStyle="rgba(255,255,255,0.08)";
-
-ctx.fillRect(
-width/2-1,
 0,
-2,
+0,
+width,
 height
 );
 
 }
 
 function drawBlocks(){
-
-const half=width/2;
 
 for(const b of blocks){
 
@@ -516,43 +469,34 @@ const depth=1-b.z;
 const size=
 b.size*
 Math.min(width,height)*
-(0.5+depth*3.2);
+(0.5+depth*3.5);
 
-const centerX=
-b.x<0.5
-?half*(b.x*2)
-:half+half*((b.x-0.5)*2);
+const x=
+width*
+(
+0.5+
+(b.x-0.5)*
+(1+depth*2.4)
+);
 
-const centerY=
-height*(0.5+(b.y-0.5)*(0.6+depth*2.4));
-
-for(let eye=0;eye<2;eye++){
-
-let eyeX=eye===0?0:half;
-
-let localX=
-b.x<0.5
-?half*(b.x*2)
-:half*((b.x-0.5)*2);
-
-if(b.side===0){
-localX=half*0.5;
-}else{
-localX=half*0.5;
-}
-
-const px=eyeX+localX;
+const y=
+height*
+(
+0.5+
+(b.y-0.5)*
+(1+depth*2.4)
+);
 
 ctx.save();
 
-ctx.translate(px,centerY);
+ctx.translate(x,y);
 
 ctx.rotate(b.rotation);
 
 ctx.fillStyle=b.color;
 
 ctx.shadowColor=b.color;
-ctx.shadowBlur=18;
+ctx.shadowBlur=20;
 
 ctx.fillRect(
 -size/2,
@@ -563,13 +507,13 @@ size
 
 ctx.shadowBlur=0;
 
-ctx.fillStyle="rgba(255,255,255,0.85)";
+ctx.fillStyle="white";
 
 ctx.beginPath();
 
-ctx.moveTo(0,-size*0.28);
+ctx.moveTo(0,-size*0.3);
 ctx.lineTo(size*0.2,0);
-ctx.lineTo(0,size*0.28);
+ctx.lineTo(0,size*0.3);
 ctx.lineTo(-size*0.2,0);
 
 ctx.closePath();
@@ -582,32 +526,25 @@ ctx.restore();
 
 }
 
-}
-
 function drawSabers(){
 
 const swords=getHandPositions();
 
-const half=width/2;
-
 for(const sword of swords){
 
-const side=sword.hand===0?0:1;
-
-for(let eye=0;eye<2;eye++){
-
-const eyeX=eye===0?0:half;
-
-const x=eyeX+sword.x*half;
-
-const y=sword.y*height;
-
-const endX=x+sword.dx*half*2.8;
-const endY=y+sword.dy*height*2.8;
-
-const color=side===0
+const color=
+sword.hand===0
 ?"#27e8ff"
 :"#ff304f";
+
+const x=sword.x*width;
+const y=sword.y*height;
+
+const endX=
+x+sword.dx*width*2.8;
+
+const endY=
+y+sword.dy*height*2.8;
 
 ctx.save();
 
@@ -617,9 +554,9 @@ ctx.strokeStyle=color;
 
 ctx.shadowColor=color;
 
-ctx.shadowBlur=20;
+ctx.shadowBlur=25;
 
-ctx.lineWidth=8;
+ctx.lineWidth=10;
 
 ctx.beginPath();
 
@@ -649,18 +586,9 @@ ctx.restore();
 
 }
 
-}
-
 function drawParticles(){
 
-const half=width/2;
-
 for(const p of particles){
-
-for(let eye=0;eye<2;eye++){
-
-const x=(eye===0?0:half)+p.x*half;
-const y=p.y*height;
 
 ctx.globalAlpha=Math.max(0,p.life);
 
@@ -669,8 +597,8 @@ ctx.fillStyle=p.color;
 ctx.beginPath();
 
 ctx.arc(
-x,
-y,
+p.x*width,
+p.y*height,
 5+p.life*5,
 0,
 Math.PI*2
@@ -680,29 +608,14 @@ ctx.fill();
 
 }
 
-}
-
 ctx.globalAlpha=1;
-
-}
-
-function drawCenterLine(){
-
-ctx.strokeStyle="rgba(255,255,255,0.12)";
-ctx.lineWidth=1;
-
-ctx.beginPath();
-
-ctx.moveTo(width/2,0);
-ctx.lineTo(width/2,height);
-
-ctx.stroke();
 
 }
 
 function updateHUD(){
 
 scoreText.textContent="SCORE "+score;
+
 comboText.textContent="COMBO "+combo;
 
 if(handData.length===0){
@@ -751,14 +664,18 @@ spawnBlock();
 }
 
 updateBlocks(dt);
+
 updateParticles(dt);
+
 checkHits();
 
 drawCamera();
+
 drawBlocks();
+
 drawSabers();
+
 drawParticles();
-drawDivider();
 
 updateHUD();
 
@@ -767,6 +684,7 @@ requestAnimationFrame(gameLoop);
 }
 
 setupHands();
+
 startCamera();
 
 </script>
